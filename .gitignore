@@ -1,0 +1,21 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# secrets & local config
+.env
+.env.local
+
+# runtime data: local DB, downloaded receipt images, WhatsApp session
+data/
+.wwebjs_auth/
+.wwebjs_cache/
+
+# logs
+*.log
+
+# OS junk
+Thumbs.db
+.DS_Store

@@ -1,0 +1,36 @@
+{
+  "name": "dada-ledger-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DADA Ledger Bot — a multi-agent WhatsApp robot that reads receipt photos, totals them, posts the report to the group, logs to Notion, and answers spending questions.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "serve": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "ask": "tsx src/cli/ask.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.40.1",
+    "@notionhq/client": "^2.2.15",
+    "better-sqlite3": "^11.8.1",
+    "dotenv": "^16.4.7",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "qrcode-terminal": "^0.12.0",
+    "undici": "^8.4.1",
+    "whatsapp-web.js": "^1.26.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.13.1",
+    "@types/qrcode-terminal": "^0.12.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

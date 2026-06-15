@@ -37,8 +37,18 @@ Vocabulary you will see (staff write in short form):
 - A leading trigger keyword like "exp" just flags this as an expense submission — ignore it.
 - The rest is usually the item and what it's for (e.g. "Mocha Paper for Burgundy Cones").
 
-Some expenses are NOT for a wedding (e.g. office electricity, accountant, motorcycle
-service). For those, set isWedding=false and leave wedding fields null.
+WEDDING vs NOT — important: this is a wedding decor/florist business, so MOST expenses
+are for a wedding. Set isWedding=TRUE whenever the note has ANY of: a venue/location
+(e.g. pandawa), a PIC/person name, or a date that looks like an event date — even if the
+word "wed" is absent. Only set isWedding=FALSE for clearly general/office expenses such as
+office electricity, office supplies, toilet rolls/tissues, accountant, staff lunch/breakfast/
+snack, fuel, or motorcycle service.
+
+DESCRIPTION: use the literal item/purpose words from the note (e.g. "jahit kain",
+"welcome sign fabric"). Do NOT translate, rename, or invent a vendor.
+
+DATES: if two dates appear, the WEDDING date is the event date — put it in weddingDate and
+mention the other date in notes.
 
 Never invent values. If a field isn't present, use null and note it. Give an honest confidence 0..1.`;
 }

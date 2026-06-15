@@ -11,7 +11,7 @@ import { mergeToDraft, type ExpenseDraft } from '../expense.js';
 import { writeExpense } from '../notion/expenses.js';
 import { answerQuestion } from '../agents/queryAgent.js';
 import { formatMoney } from '../util/money.js';
-import type { WeddingNote } from '../types.js';
+import type { Receipt, WeddingNote } from '../types.js';
 
 const { Client, LocalAuth } = pkg;
 type WAMessage = pkg.Message;
@@ -36,9 +36,19 @@ interface Collecting {
   timer: NodeJS.Timeout | null;
 }
 
+interface Pending {
+  draft: ExpenseDraft;
+  note: WeddingNote | null;
+  receipt: Receipt | null;
+  imagePath: string | null;
+  ts: number;
+  waMessageId: string;
+}
+
 // Keyed by sender id within the target group.
 const collecting = new Map<string, Collecting>();
-const pendingDrafts = new Map<string, { draft: ExpenseDraft; ts: number; waMessageId: string }>();
+const pendingDrafts = new Map<string, Pending>();
+const MERGE_WINDOW_MS = 5 * 60 * 1000; // a later photo/note merges into a draft this fresh
 
 const INTRO_MESSAGE = [
   "👋 Hi everyone, I'm *DADA Ledger Bot* — your automated bookkeeping assistant.",
@@ -170,7 +180,7 @@ async function handleMessage(msg: WAMessage): Promise<void> {
 
   // Don't treat a stray confirm/cancel word as a note.
   if (isNote && !CONFIRM_WORDS.has(word) && !CANCEL_WORDS.has(word)) {
-    onNote(msg, sender, stripKeyword(body));
+    await onNote(msg, sender, stripKeyword(body));
   }
   // else: normal chatter → ignore
 }
@@ -186,18 +196,51 @@ async function onImage(msg: WAMessage, sender: string): Promise<void> {
   );
   fs.writeFileSync(imagePath, Buffer.from(media.data, 'base64'));
 
+  const img: BufferedImage = { ts: Date.now(), mimetype: media.mimetype, data: media.data, imagePath };
+
+  // If a fresh draft is already waiting, merge this photo into it.
+  const pending = recentPending(sender);
+  if (pending) {
+    await reply(msg, '🔎 Reading the receipt photo…');
+    const receipts = await extractReceipts(
+      img.data,
+      img.mimetype as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif',
+    );
+    const extra = receipts.length > 1 ? [`${receipts.length} receipts in the photo — using the first.`] : [];
+    await finalize(msg, sender, pending.note ?? { ...EMPTY_NOTE }, receipts[0] ?? pending.receipt, imagePath, [...extra, 'Updated with the photo.']);
+    return;
+  }
+
   const c = getCollecting(sender, msg);
-  c.image = { ts: Date.now(), mimetype: media.mimetype, data: media.data, imagePath };
+  c.image = img;
   await ack(msg, c);
   schedule(sender);
 }
 
-function onNote(msg: WAMessage, sender: string, text: string): void {
+async function onNote(msg: WAMessage, sender: string, text: string): Promise<void> {
   if (!text) return;
+
+  // If a fresh draft is already waiting, merge this note into it.
+  const pending = recentPending(sender);
+  if (pending) {
+    const note = await parseEmployeeNote(text);
+    await finalize(msg, sender, note, pending.receipt, pending.imagePath, ['Updated with your note.']);
+    return;
+  }
+
   const c = getCollecting(sender, msg);
   c.noteText = c.noteText ? `${c.noteText} ${text}` : text;
-  // ack happens on image; for note-only we ack on schedule fire via summary
   schedule(sender);
+}
+
+function recentPending(sender: string): Pending | null {
+  const p = pendingDrafts.get(sender);
+  if (!p) return null;
+  if (Date.now() - p.ts > MERGE_WINDOW_MS) {
+    pendingDrafts.delete(sender);
+    return null;
+  }
+  return p;
 }
 
 function getCollecting(sender: string, msg: WAMessage): Collecting {
@@ -254,9 +297,27 @@ async function buildDraft(
     extra.push('No photo attached — recorded from your note only.');
   }
 
-  const draft = mergeToDraft(note, receipt, img?.imagePath ?? null);
-  draft.warnings.push(...extra);
-  pendingDrafts.set(sender, { draft, ts: Date.now(), waMessageId: msg.id._serialized });
+  await finalize(msg, sender, note, receipt, img?.imagePath ?? null, extra);
+}
+
+async function finalize(
+  msg: WAMessage,
+  sender: string,
+  note: WeddingNote,
+  receipt: Receipt | null,
+  imagePath: string | null,
+  extraWarnings: string[],
+): Promise<void> {
+  const draft = mergeToDraft(note, receipt, imagePath);
+  draft.warnings.push(...extraWarnings);
+  pendingDrafts.set(sender, {
+    draft,
+    note,
+    receipt,
+    imagePath,
+    ts: Date.now(),
+    waMessageId: msg.id._serialized,
+  });
   await reply(msg, renderSummary(draft));
 }
 

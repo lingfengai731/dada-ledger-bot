@@ -32,6 +32,43 @@ export interface Receipt {
   notes: string | null;
 }
 
+/**
+ * Structured data parsed from the employee's accompanying WhatsApp text message
+ * (sent as a SEPARATE message — WhatsApp captions are not used here).
+ *
+ * Example raw text:
+ *   "11/06 Mocha Paper for Burgundy Cones 11 jun lte wed pandhawa 80.000 by Jay"
+ * decodes to: weddingDate=2026-06-11, organiser="lte", location="pandhawa",
+ *   description="Mocha Paper for Burgundy Cones", amount=80000, buyer="Jay".
+ *
+ * When a date has several weddings, the employee also writes the PIC
+ * (Jay / Christi / Putri) to disambiguate which wedding it belongs to.
+ */
+export interface WeddingNote {
+  /** false for non-wedding expenses (office electricity, accountant, etc.) — wedding fields stay null. */
+  isWedding: boolean;
+  /** Wedding/event date in ISO YYYY-MM-DD (NOT the invoice date). */
+  weddingDate: string | null;
+  /** Person in charge of the wedding (Jay / Christi / Putri …) — disambiguates same-day weddings. */
+  pic: string | null;
+  /** Organiser, often shorthand, e.g. "lte". */
+  organiser: string | null;
+  /** Venue / location, e.g. "Pandawa". */
+  location: string | null;
+  /** Who actually made the purchase ("by Jay"). */
+  buyer: string | null;
+  /** Item / purpose text, e.g. "Mocha Paper for Burgundy Cones". */
+  description: string | null;
+  /** Amount in whole Rupiah, if the message states one. */
+  amount: number | null;
+  /** The original message text, kept for audit. */
+  rawText: string;
+  /** Model confidence 0..1. */
+  confidence: number;
+  /** Anything unclear / assumptions made. */
+  notes: string | null;
+}
+
 /** A receipt as stored in the database (adds bookkeeping fields). */
 export interface StoredReceipt extends Receipt {
   id: number;

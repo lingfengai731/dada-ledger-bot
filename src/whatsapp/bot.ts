@@ -11,46 +11,48 @@ import { mergeToDraft, type ExpenseDraft } from '../expense.js';
 import { writeExpense } from '../notion/expenses.js';
 import { answerQuestion } from '../agents/queryAgent.js';
 import { formatMoney } from '../util/money.js';
+import type { WeddingNote } from '../types.js';
 
 const { Client, LocalAuth } = pkg;
 type WAMessage = pkg.Message;
 type WAChat = pkg.Chat;
 
 const SUPPORTED_IMAGE = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
-const WINDOW_MS = 5 * 60 * 1000; // how long an image/note waits for its pair
-const CONFIRM_WORDS = new Set(['ok', 'okay', 'okk', 'yes', 'y', 'ya', 'yep', 'yeah', 'confirm', 'confirmed', 'oke', 'betul', 'save', 'sip']);
-const CANCEL_WORDS = new Set(['cancel', 'no', 'nope', 'batal']);
+const DEBOUNCE_MS = 10 * 1000; // wait briefly to pair a photo with its note (either order)
+const CONFIRM_WORDS = new Set(['ok', 'okay', 'okk', 'yes', 'y', 'ya', 'yep', 'yeah', 'confirm', 'confirmed', 'oke', 'betul', 'save', 'sip', 'good']);
+const CANCEL_WORDS = new Set(['cancel', 'no', 'nope', 'batal', 'skip']);
 
 interface BufferedImage {
-  msgId: string;
   ts: number;
   mimetype: string;
-  data: string; // base64
+  data: string;
   imagePath: string;
 }
+interface Collecting {
+  image?: BufferedImage;
+  noteText?: string;
+  firstMsg: WAMessage;
+  acked: boolean;
+  timer: NodeJS.Timeout | null;
+}
 
-// All keyed by sender id (within the target group).
-const recentImages = new Map<string, BufferedImage[]>();
-const pendingNotes = new Map<string, { text: string; ts: number }>();
+// Keyed by sender id within the target group.
+const collecting = new Map<string, Collecting>();
 const pendingDrafts = new Map<string, { draft: ExpenseDraft; ts: number; waMessageId: string }>();
 
-/** Posted automatically when the bot is added to a new group (English + Indonesian). */
 const INTRO_MESSAGE = [
   "👋 Hi everyone, I'm *DADA Ledger Bot* — your automated bookkeeping assistant.",
   '',
-  `📸 To log an expense: post the *receipt photo* and a short note that includes the keyword *"${config.triggerKeyword}"*, e.g.`,
-  `   _${config.triggerKeyword} Fuad 11/6 lte wed pandawa 80.000 by Jay_`,
-  "I'll read both, show you a summary, and save it once you reply *ok*. (I ignore normal chat.)",
+  "📸 Just post the *receipt photo* with a short note (date, amount, who it's for) — the way you already do. I'll read both, show you a quick summary, and save it to the ledger once you reply *ok*.",
+  '   e.g. _Fuad 11/6 christi wed pandawa 80.000 by Jay_',
   '',
-  '🧾 You can also ask: */total*, */ask <question>*, */help*.',
+  '🧾 You can also ask me: */total*, */ask <question>*, */help*.',
   '',
   '— — — — —',
   '',
   '👋 Halo semuanya, saya *DADA Ledger Bot* — asisten pembukuan otomatis.',
   '',
-  `📸 Untuk mencatat pengeluaran: kirim *foto nota* + catatan singkat berisi kata kunci *"${config.triggerKeyword}"*, mis.`,
-  `   _${config.triggerKeyword} Fuad 11/6 lte wed pandawa 80.000 by Jay_`,
-  'Saya akan membaca keduanya, menampilkan ringkasan, dan menyimpannya setelah Anda balas *ok*.',
+  '📸 Cukup kirim *foto nota* dengan catatan singkat (tanggal, jumlah, untuk siapa) seperti biasa. Saya akan membacanya, menampilkan ringkasan, dan menyimpannya setelah Anda balas *ok*.',
   '',
   '🧾 Anda juga bisa: */total*, */ask <pertanyaan>*, */help*.',
 ].join('\n');
@@ -81,7 +83,7 @@ export function createBot() {
         {
           dryRun: config.dryRun,
           notion: config.notion.writeMode,
-          trigger: config.triggerKeyword,
+          trigger: config.triggerMode,
           target: config.whatsapp.groupId || config.whatsapp.groupName,
         },
         'ready',
@@ -128,9 +130,8 @@ async function handleMessage(msg: WAMessage): Promise<void> {
   if (!(await isTargetGroup(msg))) return;
 
   const sender = msg.author ?? msg.from;
-  prune();
 
-  // 1) Receipt image
+  // 1) Receipt image → always a submission in this expense group
   if (msg.hasMedia && msg.type === 'image') {
     await onImage(msg, sender);
     return;
@@ -145,23 +146,33 @@ async function handleMessage(msg: WAMessage): Promise<void> {
     return;
   }
 
-  // 3) Expense submission (note containing the trigger keyword)
-  if (hasTrigger(body)) {
-    await onTriggeredNote(msg, sender, body);
-    return;
-  }
+  const word = body.toLowerCase().replace(/[^a-z]/g, '');
 
-  // 4) Confirm / cancel — only if this sender has a draft waiting
+  // 3) Confirm / cancel — only when this sender has a draft waiting
   if (pendingDrafts.has(sender)) {
-    const word = body.toLowerCase().replace(/[^a-z]/g, '');
     if (CONFIRM_WORDS.has(word) || body.includes('✅')) {
       await commit(msg, sender);
-    } else if (CANCEL_WORDS.has(word)) {
+      return;
+    }
+    if (CANCEL_WORDS.has(word)) {
       pendingDrafts.delete(sender);
       await reply(msg, '🗑️ Cancelled — nothing was saved.');
+      return;
     }
   }
-  // otherwise: normal chat, ignore
+
+  // 4) Is this text an expense note?
+  const alreadyCollecting = collecting.has(sender);
+  const isNote =
+    config.triggerMode === 'keyword'
+      ? hasTrigger(body)
+      : alreadyCollecting || looksLikeExpense(body) || hasTrigger(body);
+
+  // Don't treat a stray confirm/cancel word as a note.
+  if (isNote && !CONFIRM_WORDS.has(word) && !CANCEL_WORDS.has(word)) {
+    onNote(msg, sender, stripKeyword(body));
+  }
+  // else: normal chatter → ignore
 }
 
 async function onImage(msg: WAMessage, sender: string): Promise<void> {
@@ -175,34 +186,51 @@ async function onImage(msg: WAMessage, sender: string): Promise<void> {
   );
   fs.writeFileSync(imagePath, Buffer.from(media.data, 'base64'));
 
-  const img: BufferedImage = {
-    msgId: msg.id._serialized,
-    ts: Date.now(),
-    mimetype: media.mimetype,
-    data: media.data,
-    imagePath,
-  };
-  const list = recentImages.get(sender) ?? [];
-  list.push(img);
-  recentImages.set(sender, list);
-
-  // If a triggered note from this sender is already waiting, build the draft now.
-  const note = pendingNotes.get(sender);
-  if (note && Date.now() - note.ts <= WINDOW_MS) {
-    pendingNotes.delete(sender);
-    await buildDraft(msg, sender, note.text, img);
-  }
+  const c = getCollecting(sender, msg);
+  c.image = { ts: Date.now(), mimetype: media.mimetype, data: media.data, imagePath };
+  await ack(msg, c);
+  schedule(sender);
 }
 
-async function onTriggeredNote(msg: WAMessage, sender: string, body: string): Promise<void> {
-  const img = takeRecentImage(sender);
-  if (img) {
-    await buildDraft(msg, sender, body, img);
-  } else {
-    pendingNotes.set(sender, { text: body, ts: Date.now() });
-    await reply(msg, `📝 Got your note. Now send the *receipt photo* (within 5 min) and I'll total it up.`);
-  }
+function onNote(msg: WAMessage, sender: string, text: string): void {
+  if (!text) return;
+  const c = getCollecting(sender, msg);
+  c.noteText = c.noteText ? `${c.noteText} ${text}` : text;
+  // ack happens on image; for note-only we ack on schedule fire via summary
+  schedule(sender);
 }
+
+function getCollecting(sender: string, msg: WAMessage): Collecting {
+  let c = collecting.get(sender);
+  if (!c) {
+    c = { firstMsg: msg, acked: false, timer: null };
+    collecting.set(sender, c);
+  }
+  return c;
+}
+
+async function ack(msg: WAMessage, c: Collecting): Promise<void> {
+  if (c.acked) return;
+  c.acked = true;
+  await reply(msg, '🔎 Reading your expense… one moment.');
+}
+
+function schedule(sender: string): void {
+  const c = collecting.get(sender);
+  if (!c) return;
+  if (c.timer) clearTimeout(c.timer);
+  c.timer = setTimeout(() => {
+    collecting.delete(sender);
+    buildDraft(c.firstMsg, sender, c.noteText ?? '', c.image ?? null).catch((err) =>
+      logger.error({ err }, 'buildDraft failed'),
+    );
+  }, DEBOUNCE_MS);
+}
+
+const EMPTY_NOTE: WeddingNote = {
+  isWedding: false, weddingDate: null, pic: null, organiser: null, location: null,
+  buyer: null, description: null, amount: null, rawText: '', confidence: 0, notes: null,
+};
 
 async function buildDraft(
   msg: WAMessage,
@@ -210,22 +238,24 @@ async function buildDraft(
   noteText: string,
   img: BufferedImage | null,
 ): Promise<void> {
-  const note = await parseEmployeeNote(stripKeyword(noteText));
+  const note = noteText.trim() ? await parseEmployeeNote(noteText) : { ...EMPTY_NOTE };
 
   let receipt = null;
-  const extraWarnings: string[] = [];
+  const extra: string[] = [];
   if (img) {
     const receipts = await extractReceipts(
       img.data,
       img.mimetype as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif',
     );
-    if (receipts.length > 1) extraWarnings.push(`${receipts.length} receipts detected in the photo — using the first; submit the rest separately.`);
+    if (receipts.length > 1) extra.push(`${receipts.length} receipts in the photo — using the first; send the rest separately.`);
     receipt = receipts[0] ?? null;
-    if (!receipt) extraWarnings.push('Could not read the receipt image clearly.');
+    if (!receipt) extra.push('Could not read the receipt image clearly.');
+  } else {
+    extra.push('No photo attached — recorded from your note only.');
   }
 
   const draft = mergeToDraft(note, receipt, img?.imagePath ?? null);
-  draft.warnings.push(...extraWarnings);
+  draft.warnings.push(...extra);
   pendingDrafts.set(sender, { draft, ts: Date.now(), waMessageId: msg.id._serialized });
   await reply(msg, renderSummary(draft));
 }
@@ -253,11 +283,11 @@ async function commit(msg: WAMessage, sender: string): Promise<void> {
   pendingDrafts.delete(sender);
 
   if (result.written) {
-    await reply(msg, `✅ Saved to Notion. Total ${formatMoney(draft.cost)} ${config.currency}.`);
+    await reply(msg, `✅ Saved to Notion. ${draft.vendorDescription ?? ''} — ${formatMoney(draft.cost)} ${config.currency}.`);
   } else {
     await reply(
       msg,
-      `✅ Recorded locally (${formatMoney(draft.cost)} ${config.currency}).\n_Notion preview mode — not written. Set NOTION_WRITE=live + a data source id to push to Notion._`,
+      `✅ Recorded (${formatMoney(draft.cost)} ${config.currency}).\n_Notion preview mode — not written yet._`,
     );
   }
 }
@@ -270,39 +300,25 @@ function renderSummary(draft: ExpenseDraft): string {
     lines.push(`*Wedding date:* ${draft.weddingDate ?? '❓ missing'}`);
     lines.push(`*PIC:* ${draft.pic ?? '❓ missing'}`);
   } else {
-    lines.push('*Type:* non-wedding expense');
+    lines.push('*Type:* non-wedding');
   }
   if (draft.invoiceDate) lines.push(`*Invoice date:* ${draft.invoiceDate}`);
   if (draft.handler) lines.push(`*Handler (buyer):* ${draft.handler}`);
-
-  if (draft.warnings.length) {
-    lines.push('', '⚠️ ' + draft.warnings.join('\n⚠️ '));
-  }
-  lines.push('', `Reply *ok* to save, *cancel* to discard, or resend a corrected _${config.triggerKeyword} ..._ note.`);
+  if (draft.warnings.length) lines.push('', '⚠️ ' + draft.warnings.join('\n⚠️ '));
+  lines.push('', `Reply *ok* to save, *cancel* to discard, or just resend with the correction.`);
   return lines.join('\n');
 }
 
-function takeRecentImage(sender: string): BufferedImage | null {
-  const list = recentImages.get(sender);
-  if (!list || list.length === 0) return null;
-  // most recent within window
-  for (let i = list.length - 1; i >= 0; i--) {
-    if (Date.now() - list[i].ts <= WINDOW_MS) {
-      const [img] = list.splice(i, 1);
-      recentImages.set(sender, list);
-      return img;
-    }
-  }
-  return null;
+function looksLikeExpense(text: string): boolean {
+  const hasAmount =
+    /\d{1,3}(?:[.,]\d{3})+/.test(text) || /\b\d{4,}\b/.test(text.replace(/[.,\s]/g, ''));
+  const hasDate = /\b\d{1,2}\s*[\/\-]\s*\d{1,2}\b/.test(text);
+  return hasAmount || hasDate;
 }
 
 function hasTrigger(body: string): boolean {
   const kw = config.triggerKeyword.toLowerCase();
-  return body
-    .toLowerCase()
-    .split(/\s+/)
-    .map((t) => t.replace(/[^a-z0-9]/g, ''))
-    .includes(kw);
+  return body.toLowerCase().split(/\s+/).map((t) => t.replace(/[^a-z0-9]/g, '')).includes(kw);
 }
 
 function stripKeyword(body: string): string {
@@ -314,35 +330,15 @@ function stripKeyword(body: string): string {
     .trim();
 }
 
-function prune(): void {
-  const now = Date.now();
-  for (const [k, list] of recentImages) {
-    const kept = list.filter((i) => now - i.ts <= WINDOW_MS);
-    if (kept.length) recentImages.set(k, kept);
-    else recentImages.delete(k);
-  }
-  for (const [k, n] of pendingNotes) if (now - n.ts > WINDOW_MS) pendingNotes.delete(k);
-  for (const [k, d] of pendingDrafts) if (now - d.ts > 30 * 60 * 1000) pendingDrafts.delete(k);
-}
-
 async function handleCommand(msg: WAMessage, body: string): Promise<void> {
   const [cmd, ...rest] = body.slice(1).split(/\s+/);
   const arg = rest.join(' ').trim();
-
   if (cmd === 'help') {
     await reply(msg, INTRO_MESSAGE);
-    return;
-  }
-  if (cmd === 'total') {
+  } else if (cmd === 'total') {
     await reply(msg, await answerQuestion('What is the total spend this month?'));
-    return;
-  }
-  if (cmd === 'ask' || cmd === 'q') {
-    if (!arg) {
-      await reply(msg, 'Usage: /ask <your question>');
-      return;
-    }
-    await reply(msg, await answerQuestion(arg));
+  } else if (cmd === 'ask' || cmd === 'q') {
+    await reply(msg, arg ? await answerQuestion(arg) : 'Usage: /ask <your question>');
   }
 }
 

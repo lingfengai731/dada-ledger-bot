@@ -27,7 +27,13 @@ export const config = {
       return Boolean(process.env.NOTION_API_KEY);
     },
   },
-  /** Keyword an employee includes in the note to submit an expense (case-insensitive). */
+  /**
+   * 'auto'    = any receipt photo, or any message with a date/amount, is an expense
+   *             submission (best for a dedicated expense group). No keyword needed.
+   * 'keyword' = only messages containing TRIGGER_KEYWORD are processed (strict).
+   */
+  triggerMode: (process.env.TRIGGER_MODE ?? 'auto') as 'auto' | 'keyword',
+  /** Optional keyword accelerator; required only in 'keyword' mode. */
   triggerKeyword: process.env.TRIGGER_KEYWORD ?? 'exp',
   dryRun: bool(process.env.DRY_RUN, true),
   currency: process.env.CURRENCY ?? 'IDR',

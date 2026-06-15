@@ -13,6 +13,12 @@ data/
 .wwebjs_auth/
 .wwebjs_cache/
 
+# real chat exports / sample data — NEVER commit (private financial data)
+WhatsApp Chat*/
+WhatsApp Chat*.zip
+*_chat.txt
+samples/
+
 # logs
 *.log
 

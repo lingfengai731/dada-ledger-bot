@@ -271,8 +271,9 @@ function schedule(sender: string): void {
 }
 
 const EMPTY_NOTE: WeddingNote = {
-  isWedding: false, weddingDate: null, pic: null, organiser: null, location: null,
-  buyer: null, description: null, amount: null, rawText: '', confidence: 0, notes: null,
+  category: 'general', isWedding: false, invoiceDate: null, weddingDate: null, pic: null,
+  organiser: null, location: null, buyer: null, description: null, amount: null,
+  rawText: '', confidence: 0, notes: null,
 };
 
 async function buildDraft(

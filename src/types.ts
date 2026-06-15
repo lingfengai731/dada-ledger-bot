@@ -47,8 +47,12 @@ export interface Receipt {
 export interface WeddingNote {
   /** false for non-wedding expenses (office electricity, accountant, etc.) — wedding fields stay null. */
   isWedding: boolean;
-  /** Wedding/event date in ISO YYYY-MM-DD (NOT the invoice date). */
+  /** Wedding/event date in ISO YYYY-MM-DD (the SECOND date in notes like "06/15 item 06/16 ..."). */
   weddingDate: string | null;
+  /** Invoice/purchase date in ISO (the FIRST date in the note), if stated. */
+  invoiceDate: string | null;
+  /** 'wedding' | 'shop' | 'general' — matches DADA's three Notion views. */
+  category: 'wedding' | 'shop' | 'general';
   /** Person in charge of the wedding (Jay / Christi / Putri …) — disambiguates same-day weddings. */
   pic: string | null;
   /** Organiser, often shorthand, e.g. "lte". */

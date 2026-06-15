@@ -54,16 +54,16 @@ export function mergeToDraft(
     );
   }
 
-  const isWedding = note.isWedding || note.weddingDate != null;
+  const isWedding = note.category === 'wedding' || note.isWedding;
   if (isWedding && !note.weddingDate) warnings.push('Wedding expense but no wedding date detected.');
-  if (isWedding && !note.pic) warnings.push('No PIC detected — needed when a date has several weddings.');
   if (cost === null) warnings.push('No amount detected on the receipt or in the note.');
   if (!vendorDescription) warnings.push('No vendor/description detected.');
 
   return {
     vendorDescription,
     weddingDate: isWedding ? note.weddingDate : null,
-    invoiceDate: receipt?.date ?? null,
+    // The note's first date is the invoice date; fall back to the receipt's printed date.
+    invoiceDate: note.invoiceDate ?? receipt?.date ?? null,
     cost,
     pic: note.pic,
     handler: note.buyer,

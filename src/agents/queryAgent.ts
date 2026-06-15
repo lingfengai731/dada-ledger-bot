@@ -8,54 +8,56 @@ import { todayISO } from '../util/dates.js';
 
 const tools: Anthropic.Tool[] = [
   {
-    name: 'sum_receipts',
+    name: 'sum_expenses',
     description:
-      'Sum the total spend and count receipts, optionally filtered by date range, ' +
-      'vendor, or recipient. Use this for "how much did we spend" questions. ' +
-      'Dates are ISO YYYY-MM-DD and inclusive.',
+      'Sum total spend and count expenses, optionally filtered by WEDDING DATE range, ' +
+      'PIC (person in charge), or wedding vs non-wedding. Use for "how much did we spend" ' +
+      'questions. Dates are ISO YYYY-MM-DD, inclusive, and filter on the wedding date.',
     input_schema: {
       type: 'object',
       properties: {
-        from: { type: 'string', description: 'Start date YYYY-MM-DD (inclusive)' },
-        to: { type: 'string', description: 'End date YYYY-MM-DD (inclusive)' },
-        vendor: { type: 'string', description: 'Vendor name substring, e.g. "Fuad"' },
-        recipient: { type: 'string', description: 'Recipient substring, e.g. "DADA"' },
+        from: { type: 'string', description: 'Wedding date from YYYY-MM-DD (inclusive)' },
+        to: { type: 'string', description: 'Wedding date to YYYY-MM-DD (inclusive)' },
+        pic: { type: 'string', description: 'PIC name, e.g. "JAY", "CHRISTI"' },
+        isWedding: { type: 'boolean', description: 'true = only wedding expenses, false = only non-wedding' },
       },
     },
   },
   {
-    name: 'list_receipts',
+    name: 'list_expenses',
     description:
-      'List individual receipts (vendor, invoice, date, recipient, total) matching ' +
-      'filters. Use this for "which receipts" / "show me the receipts" questions.',
+      'List individual expenses (vendor/description, wedding date, cost, PIC, handler) ' +
+      'matching filters. Use for "which expenses" / "show me" questions.',
     input_schema: {
       type: 'object',
       properties: {
-        from: { type: 'string', description: 'Start date YYYY-MM-DD (inclusive)' },
-        to: { type: 'string', description: 'End date YYYY-MM-DD (inclusive)' },
-        vendor: { type: 'string' },
-        recipient: { type: 'string' },
-        limit: { type: 'integer', description: 'Max rows (default 20)' },
+        from: { type: 'string', description: 'Wedding date from YYYY-MM-DD' },
+        to: { type: 'string', description: 'Wedding date to YYYY-MM-DD' },
+        pic: { type: 'string' },
+        isWedding: { type: 'boolean' },
+        limit: { type: 'integer', description: 'Max rows (default 30)' },
       },
     },
   },
 ];
 
 function runTool(name: string, input: any): unknown {
-  if (name === 'sum_receipts') {
-    const { total, count } = store.sumReceipts(input ?? {});
+  if (name === 'sum_expenses') {
+    const { total, count } = store.sumExpenses(input ?? {});
     return { total, count, formattedTotal: formatMoney(total), currency: config.currency };
   }
-  if (name === 'list_receipts') {
-    const rows = store.queryReceipts({ ...(input ?? {}), limit: input?.limit ?? 20 });
-    return rows.map((r) => ({
+  if (name === 'list_expenses') {
+    const rows = store.listExpenses({ ...(input ?? {}), limit: input?.limit ?? 30 });
+    return rows.map((r: any) => ({
       id: r.id,
-      vendor: r.vendor,
-      invoiceNo: r.invoiceNo,
-      date: r.date,
-      recipient: r.recipient,
-      total: r.total,
-      formattedTotal: formatMoney(r.total),
+      vendorDescription: r.vendor_description,
+      weddingDate: r.wedding_date,
+      invoiceDate: r.invoice_date,
+      pic: r.pic,
+      handler: r.handler,
+      isWedding: Boolean(r.is_wedding),
+      cost: r.cost,
+      formattedCost: formatMoney(r.cost),
     }));
   }
   return { error: `unknown tool ${name}` };

@@ -15,7 +15,7 @@ async function main(): Promise<void> {
   logger.info(
     {
       model: config.anthropic.model,
-      notion: config.notion.enabled,
+      notion: config.notion.hasToken ? config.notion.writeMode : 'no-token',
       dryRun: config.dryRun,
     },
     'starting DADA Ledger Bot…',

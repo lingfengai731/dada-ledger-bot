@@ -37,6 +37,26 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_receipts_date ON receipts(date);
   CREATE INDEX IF NOT EXISTS idx_receipts_recipient ON receipts(recipient);
   CREATE INDEX IF NOT EXISTS idx_receipts_vendor ON receipts(vendor);
+
+  -- Confirmed expense submissions (the records that go to Notion EXPENSES).
+  CREATE TABLE IF NOT EXISTS expenses (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    wa_message_id      TEXT,
+    submitter          TEXT,
+    vendor_description TEXT,
+    wedding_date       TEXT,        -- ISO or null
+    invoice_date       TEXT,
+    cost               INTEGER,     -- whole Rupiah
+    pic                TEXT,
+    handler            TEXT,
+    is_wedding         INTEGER NOT NULL DEFAULT 0,
+    image_path         TEXT,
+    raw_note           TEXT,
+    notion_page_id     TEXT,
+    created_at         INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_expenses_wdate ON expenses(wedding_date);
+  CREATE INDEX IF NOT EXISTS idx_expenses_pic ON expenses(pic);
 `);
 
 export interface InsertReceiptInput {
@@ -144,6 +164,77 @@ export const store = {
     return rows.map(rowToStored);
   },
 
+  // ---- expenses (confirmed submissions) ----
+
+  insertExpense(e: {
+    waMessageId: string | null;
+    submitter: string;
+    vendorDescription: string | null;
+    weddingDate: string | null;
+    invoiceDate: string | null;
+    cost: number | null;
+    pic: string | null;
+    handler: string | null;
+    isWedding: boolean;
+    imagePath: string | null;
+    rawNote: string;
+    notionPageId: string | null;
+  }): number {
+    const info = db
+      .prepare(
+        `INSERT INTO expenses
+          (wa_message_id, submitter, vendor_description, wedding_date, invoice_date,
+           cost, pic, handler, is_wedding, image_path, raw_note, notion_page_id, created_at)
+         VALUES (@wa, @submitter, @vendor, @wdate, @idate, @cost, @pic, @handler,
+                 @isw, @img, @note, @notion, @created)`,
+      )
+      .run({
+        wa: e.waMessageId,
+        submitter: e.submitter,
+        vendor: e.vendorDescription,
+        wdate: e.weddingDate,
+        idate: e.invoiceDate,
+        cost: e.cost,
+        pic: e.pic,
+        handler: e.handler,
+        isw: e.isWedding ? 1 : 0,
+        img: e.imagePath,
+        note: e.rawNote,
+        notion: e.notionPageId,
+        created: Date.now(),
+      });
+    return Number(info.lastInsertRowid);
+  },
+
+  /** Sum/list expenses with optional filters. Dates filter on wedding_date. */
+  sumExpenses(filters: { from?: string; to?: string; pic?: string; isWedding?: boolean }): {
+    total: number;
+    count: number;
+  } {
+    const { clause, params } = buildExpenseWhere(filters);
+    const row = db
+      .prepare(`SELECT COALESCE(SUM(cost),0) AS total, COUNT(*) AS count FROM expenses ${clause}`)
+      .get(params) as { total: number; count: number };
+    return row;
+  },
+
+  listExpenses(filters: {
+    from?: string;
+    to?: string;
+    pic?: string;
+    isWedding?: boolean;
+    limit?: number;
+  }): any[] {
+    const { clause, params } = buildExpenseWhere(filters);
+    const limit = filters.limit && filters.limit > 0 ? filters.limit : 30;
+    return db
+      .prepare(
+        `SELECT id, vendor_description, wedding_date, invoice_date, cost, pic, handler, is_wedding
+         FROM expenses ${clause} ORDER BY COALESCE(wedding_date, invoice_date) DESC, id DESC LIMIT ${limit}`,
+      )
+      .all(params);
+  },
+
   /** Aggregate total + count for a filter set. */
   sumReceipts(filters: {
     from?: string;
@@ -184,6 +275,34 @@ function buildWhere(filters: {
   if (filters.recipient) {
     where.push('LOWER(recipient) LIKE @recipient');
     params.recipient = `%${filters.recipient.toLowerCase()}%`;
+  }
+  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  return { clause, params };
+}
+
+function buildExpenseWhere(filters: {
+  from?: string;
+  to?: string;
+  pic?: string;
+  isWedding?: boolean;
+}): { clause: string; params: Record<string, unknown> } {
+  const where: string[] = [];
+  const params: Record<string, unknown> = {};
+  if (filters.from) {
+    where.push('wedding_date >= @from');
+    params.from = filters.from;
+  }
+  if (filters.to) {
+    where.push('wedding_date <= @to');
+    params.to = filters.to;
+  }
+  if (filters.pic) {
+    where.push('UPPER(pic) LIKE @pic');
+    params.pic = `%${filters.pic.toUpperCase()}%`;
+  }
+  if (filters.isWedding !== undefined) {
+    where.push('is_wedding = @isw');
+    params.isw = filters.isWedding ? 1 : 0;
   }
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   return { clause, params };

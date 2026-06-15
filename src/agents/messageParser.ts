@@ -13,7 +13,11 @@ import type { WeddingNote } from '../types.js';
  *  - shorthand:     wed = wedding, lte = an organiser, pandawa/pandhawa = venue
  *  - dates:         "11/6", "11 jun" → 11 June (resolve year from today)
  */
-const KNOWN_PIC = ['Jay', 'Christi', 'Putri', 'Ling', 'Made', 'Rania', 'Siu', 'Iputu'];
+// Real staff names from the Notion schema (PIC + HANDLER option lists).
+const KNOWN_PIC = ['Ling', 'Jay', 'Christi', 'Putri', 'General', 'Kent', 'Rania'];
+const KNOWN_STAFF = [
+  ...KNOWN_PIC, 'Minggu', 'Putu', 'Made', 'Jesicha', 'Hamzah', 'Jessica',
+];
 
 function buildSystem(): string {
   return `You parse short, abbreviated WhatsApp messages written by DADA Island staff
@@ -29,7 +33,8 @@ Vocabulary you will see (staff write in short form):
   the PIC (person in charge): one of ${KNOWN_PIC.join(', ')} (or a similar staff name).
 - There is also an organiser (often shorthand, e.g. "lte") and a location/venue
   (e.g. "Pandawa"/"pandhawa").
-- "by <name>" = who made the purchase (the buyer).
+- "by <name>" = who made the purchase (the buyer). Known staff: ${KNOWN_STAFF.join(', ')}.
+- A leading trigger keyword like "exp" just flags this as an expense submission — ignore it.
 - The rest is usually the item and what it's for (e.g. "Mocha Paper for Burgundy Cones").
 
 Some expenses are NOT for a wedding (e.g. office electricity, accountant, motorcycle

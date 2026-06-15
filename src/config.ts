@@ -19,11 +19,16 @@ export const config = {
   },
   notion: {
     apiKey: process.env.NOTION_API_KEY ?? '',
-    databaseId: process.env.NOTION_DATABASE_ID ?? '',
-    get enabled(): boolean {
-      return Boolean(process.env.NOTION_API_KEY && process.env.NOTION_DATABASE_ID);
+    /** The "EXPENSES" data source id to write rows into (2025-09-03 API). */
+    dataSourceId: process.env.NOTION_DATA_SOURCE_ID ?? '',
+    /** 'preview' = log the row but DON'T write; 'live' = actually create the Notion row. */
+    writeMode: (process.env.NOTION_WRITE ?? 'preview') as 'preview' | 'live',
+    get hasToken(): boolean {
+      return Boolean(process.env.NOTION_API_KEY);
     },
   },
+  /** Keyword an employee includes in the note to submit an expense (case-insensitive). */
+  triggerKeyword: process.env.TRIGGER_KEYWORD ?? 'exp',
   dryRun: bool(process.env.DRY_RUN, true),
   currency: process.env.CURRENCY ?? 'IDR',
   locale: process.env.LOCALE ?? 'id-ID',

@@ -8,9 +8,9 @@ import type { WeddingNote } from '../types.js';
  * into structured fields. Tuned from real DADA - Financial Report Group messages.
  */
 
-// From the Notion EXPENSES schema + observed staff names.
-const PIC_OPTIONS = ['LING', 'JAY', 'CHRISTI', 'PUTRI', 'GENERAL', 'KENT', 'RANIA'];
-const STAFF = [...PIC_OPTIONS, 'MINGGU', 'PUTU', 'MADE', 'JESICHA', 'HAMZAH', 'JESSICA', 'ANTA WAYAN', 'IPUTU'];
+// PIC = current wedding leads (KENT/RANIA excluded per boss). STAFF = everyone who may pay.
+const PIC_OPTIONS = ['LING', 'JAY', 'CHRISTI', 'PUTRI', 'GENERAL'];
+const STAFF = [...PIC_OPTIONS, 'RANIA', 'MINGGU', 'PUTU', 'MADE', 'JESICHA', 'HAMZAH', 'JESSICA', 'ANTA WAYAN', 'IPUTU'];
 const VENUES = ['Pandawa', 'Komaneka', 'Komaneka Kramas', 'Samabe', 'The Seed', 'Lombok'];
 
 function buildSystem(): string {

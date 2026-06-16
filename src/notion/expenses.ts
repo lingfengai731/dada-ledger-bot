@@ -10,8 +10,9 @@ import type { ExpenseDraft } from '../expense.js';
  * fixed option lists, so free-text names are mapped to the closest option.
  */
 
-// Canonical option lists, read from the live schema (npx tsx src/cli/notion-schema.ts).
-const PIC_OPTIONS = ['LING', 'JAY', 'CHRISTI', 'PUTRI', 'GENERAL', 'KENT', 'RANIA'];
+// PIC = current wedding leads only (boss: KENT is a former employee, RANIA is an
+// assistant who doesn't run weddings — both excluded from PIC).
+const PIC_OPTIONS = ['LING', 'JAY', 'CHRISTI', 'PUTRI', 'GENERAL'];
 const HANDLER_OPTIONS = [
   'RANIA', 'JAY', 'PUTRI', 'MINGGU', 'PUTU', 'LING', 'KENT', 'CHRISTI', 'MADE',
   'JESICHA', 'HAMZAH', 'JESSICA',
@@ -48,13 +49,16 @@ export interface NotionResult {
 
 function buildProperties(draft: ExpenseDraft): { properties: Record<string, unknown>; unmapped: string[] } {
   const unmapped: string[] = [];
+  // The ledger writes vendor/description in UPPERCASE — match that house style.
+  const title = (draft.vendorDescription ?? 'UNKNOWN').toUpperCase().slice(0, 1900);
   const properties: Record<string, unknown> = {
-    'VENDOR / DESCRIPTION': {
-      title: [{ text: { content: (draft.vendorDescription ?? 'Unknown').slice(0, 1900) } }],
-    },
+    'VENDOR / DESCRIPTION': { title: [{ text: { content: title } }] },
   };
 
-  if (draft.cost != null) properties['COST'] = { number: draft.cost };
+  if (draft.cost != null) {
+    properties['COST'] = { number: draft.cost };
+    properties['PRICE'] = { number: draft.cost }; // historical rows fill PRICE = COST
+  }
   if (draft.invoiceDate) properties['INVOICE DATE'] = { date: { start: draft.invoiceDate } };
   if (draft.isWedding && draft.weddingDate)
     properties['WEDDING DATE'] = { date: { start: draft.weddingDate } };

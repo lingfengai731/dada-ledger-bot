@@ -45,11 +45,12 @@ LOCATION & PIC:
 - "0620 ling's" → "ling's" implies PIC Ling.
 Known venues: ${VENUES.join(', ')}. Known staff: ${STAFF.join(', ')}.
 
-PIC vs BUYER:
-- buyer = who bought/paid it: appears near "by <name>", "tf <name>", "<name> TRF/trf", or a
-  trailing name like "putu", "Minggu", "putri". ("TRF"/"tf" just means bank transfer.)
-- pic = the wedding's person-in-charge (often after the dash in "(Location-PIC)", or "ling's").
-  May be absent — that's fine.
+PIC vs BUYER (two different people):
+- pic = the WEDDING's person-in-charge. It is exactly one of: LING, JAY, CHRISTI, PUTRI, GENERAL.
+  Found after the dash in "(Location-PIC)", or as "ling's", etc. NOTE: "jessica" is the same
+  person as JAY — output JAY. May be absent — that's fine. Use GENERAL for non-wedding.
+- buyer = who PAID for it (to be reimbursed) = the HANDLER. Appears near "by <name>", "tf <name>",
+  "<name> TRF/trf", or as a trailing name (putu, Minggu, putri, rania…). "TRF"/"tf" = bank transfer.
 
 DESCRIPTION: the literal item/purpose words ("jahit kain", "Taper Candles", "gosend kyea",
 "lace for welcome sign"). Never translate or invent a vendor name.

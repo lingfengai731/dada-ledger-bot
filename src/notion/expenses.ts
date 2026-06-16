@@ -16,6 +16,8 @@ const HANDLER_OPTIONS = [
   'RANIA', 'JAY', 'PUTRI', 'MINGGU', 'PUTU', 'LING', 'KENT', 'CHRISTI', 'MADE',
   'JESICHA', 'HAMZAH', 'JESSICA',
 ];
+// Name aliases for the PIC column (boss: "jessica" is the same person as JAY).
+const PIC_ALIAS: Record<string, string> = { JESSICA: 'JAY', JESICHA: 'JAY' };
 
 const notion = config.notion.hasToken
   ? new Client({
@@ -57,7 +59,8 @@ function buildProperties(draft: ExpenseDraft): { properties: Record<string, unkn
   if (draft.isWedding && draft.weddingDate)
     properties['WEDDING DATE'] = { date: { start: draft.weddingDate } };
 
-  const pic = mapOption(draft.pic, PIC_OPTIONS);
+  const picRaw = draft.pic ? (PIC_ALIAS[draft.pic.trim().toUpperCase()] ?? draft.pic) : null;
+  const pic = mapOption(picRaw, PIC_OPTIONS);
   if (pic) properties['PIC'] = { multi_select: [{ name: pic }] };
   else if (draft.pic) unmapped.push(`PIC "${draft.pic}"`);
 

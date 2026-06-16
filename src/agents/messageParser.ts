@@ -54,59 +54,77 @@ PIC vs BUYER:
 DESCRIPTION: the literal item/purpose words ("jahit kain", "Taper Candles", "gosend kyea",
 "lace for welcome sign"). Never translate or invent a vendor name.
 
+MULTIPLE EXPENSES IN ONE MESSAGE: a single message may list SEVERAL separate expenses, one
+per line, each with its own amount (e.g. several "Gosend ... 20.000 ..." lines). Return one
+array element per distinct expense. BUT items joined by commas within a single purchase
+(e.g. "anggur merah, anggur hijau, anggur hitam + ongkir 4.050.000") are ONE expense.
+
 Never invent values; use null if absent. Give an honest confidence 0..1.`;
 }
 
-const INSTRUCTION = `Parse the message. Respond with ONLY this JSON:
+const INSTRUCTION = `Parse the message into one or more expenses. Respond with ONLY this JSON:
 {
-  "category": "wedding" | "shop" | "general",
-  "isWedding": boolean,
-  "invoiceDate": string | null,    // ISO, the FIRST date
-  "weddingDate": string | null,    // ISO, the SECOND date (event)
-  "pic": string | null,
-  "organiser": string | null,
-  "location": string | null,
-  "buyer": string | null,
-  "description": string | null,
-  "amount": number | null,
-  "confidence": number,
-  "notes": string | null
+  "expenses": [
+    {
+      "category": "wedding" | "shop" | "general",
+      "isWedding": boolean,
+      "invoiceDate": string | null,    // ISO, the FIRST date
+      "weddingDate": string | null,    // ISO, the SECOND date (event)
+      "pic": string | null,
+      "organiser": string | null,
+      "location": string | null,
+      "buyer": string | null,
+      "description": string | null,
+      "amount": number | null,
+      "confidence": number,
+      "notes": string | null
+    }
+  ]
 }`;
 
-export async function parseEmployeeNote(rawText: string): Promise<WeddingNote> {
+function toNote(parsed: any, rawText: string): WeddingNote {
+  const category = ['wedding', 'shop', 'general'].includes(parsed?.category)
+    ? (parsed.category as WeddingNote['category'])
+    : 'wedding';
+  return {
+    category,
+    isWedding: category === 'wedding' || Boolean(parsed?.isWedding),
+    invoiceDate: str(parsed?.invoiceDate),
+    weddingDate: str(parsed?.weddingDate),
+    pic: str(parsed?.pic),
+    organiser: str(parsed?.organiser),
+    location: str(parsed?.location),
+    buyer: str(parsed?.buyer),
+    description: str(parsed?.description),
+    amount: num(parsed?.amount),
+    rawText,
+    confidence: typeof parsed?.confidence === 'number' ? parsed.confidence : 0.5,
+    notes: str(parsed?.notes),
+  };
+}
+
+/** Parse a note that may contain several expenses. Returns at least one. */
+export async function parseEmployeeNotes(rawText: string): Promise<WeddingNote[]> {
   const response = await claude.messages.create({
     model: MODEL,
-    max_tokens: 1024,
+    max_tokens: 2048,
     system: buildSystem(),
     messages: [{ role: 'user', content: `${INSTRUCTION}\n\nMessage:\n"""${rawText}"""` }],
   });
 
   const text = response.content.map((b) => (b.type === 'text' ? b.text : '')).join('\n').trim();
   const parsed = safeParse(text);
-  if (!parsed) {
-    logger.warn({ text }, 'message parser returned unparseable output');
-    return emptyNote(rawText);
+  const list = Array.isArray(parsed?.expenses) ? parsed!.expenses : [];
+  if (list.length === 0) {
+    logger.warn({ text }, 'message parser returned no expenses');
+    return [emptyNote(rawText)];
   }
+  return list.map((e: any) => toNote(e, rawText));
+}
 
-  const category = ['wedding', 'shop', 'general'].includes(parsed.category as string)
-    ? (parsed.category as WeddingNote['category'])
-    : 'wedding';
-
-  return {
-    category,
-    isWedding: category === 'wedding' || Boolean(parsed.isWedding),
-    invoiceDate: str(parsed.invoiceDate),
-    weddingDate: str(parsed.weddingDate),
-    pic: str(parsed.pic),
-    organiser: str(parsed.organiser),
-    location: str(parsed.location),
-    buyer: str(parsed.buyer),
-    description: str(parsed.description),
-    amount: num(parsed.amount),
-    rawText,
-    confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
-    notes: str(parsed.notes),
-  };
+/** Convenience: parse and return the first expense only. */
+export async function parseEmployeeNote(rawText: string): Promise<WeddingNote> {
+  return (await parseEmployeeNotes(rawText))[0] ?? emptyNote(rawText);
 }
 
 function emptyNote(rawText: string): WeddingNote {

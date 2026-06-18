@@ -8,10 +8,12 @@ import { parseChineseDate, daysBetween } from '../util/dates.js';
  * (client, contact, venue, PIC, date). It is the ground truth the bot uses to
  * fill in a wedding's DATE / PIC / VENUE when staff omit them on a receipt note.
  *
- * Source: a CSV snapshot exported from the Notion "WEDDING SCHEDULE" database
- * (data/wedding-schedule.csv). The Notion integration is not yet shared on that
- * page, so we read the snapshot; once the page is shared we can swap in a live
- * read behind the same `lookupSchedule()` API without touching callers.
+ * Source: LIVE from the Notion "WEDDING SCHEDULE" data source when
+ * NOTION_WEDDING_DATA_SOURCE_ID is set and the page is shared with the
+ * integration (refreshed periodically, so weddings the team add show up
+ * automatically). Falls back to a CSV snapshot (data/wedding-schedule.csv)
+ * until/if the first live refresh succeeds. Lookups are sync against the
+ * in-memory cache regardless of source.
  */
 
 export interface ScheduleEntry {
@@ -83,10 +85,27 @@ function parseCsv(text: string): string[][] {
   return rows;
 }
 
-let cache: { entries: ScheduleEntry[]; byVenue: Map<string, ScheduleEntry[]>; byDate: Map<string, ScheduleEntry[]> } | null = null;
+type Cache = { entries: ScheduleEntry[]; byVenue: Map<string, ScheduleEntry[]>; byDate: Map<string, ScheduleEntry[]> };
+let cache: Cache | null = null;
+let liveLoaded = false; // true once a live Notion refresh has populated the cache
 
-function load(): NonNullable<typeof cache> {
+function buildIndex(entries: ScheduleEntry[]): Cache {
+  const byVenue = new Map<string, ScheduleEntry[]>();
+  const byDate = new Map<string, ScheduleEntry[]>();
+  for (const e of entries) {
+    if (e.venueKey) (byVenue.get(e.venueKey) ?? byVenue.set(e.venueKey, []).get(e.venueKey)!).push(e);
+    (byDate.get(e.weddingDate) ?? byDate.set(e.weddingDate, []).get(e.weddingDate)!).push(e);
+  }
+  cache = { entries, byVenue, byDate };
+  return cache;
+}
+
+function load(): Cache {
   if (cache) return cache;
+  return buildIndex(loadFromCsv());
+}
+
+function loadFromCsv(): ScheduleEntry[] {
   const entries: ScheduleEntry[] = [];
   const file = config.paths.weddingScheduleCsv;
   try {
@@ -122,27 +141,92 @@ function load(): NonNullable<typeof cache> {
           status: (cells[iStatus] ?? '').trim(),
         });
       }
-      logger.info({ count: entries.length, file }, 'wedding schedule loaded');
+      logger.info({ count: entries.length, file }, 'wedding schedule loaded from CSV');
     } else {
       logger.warn({ file }, 'wedding schedule CSV not found — schedule lookups disabled');
     }
   } catch (err) {
-    logger.error({ err }, 'failed to load wedding schedule');
+    logger.error({ err }, 'failed to load wedding schedule CSV');
   }
-
-  const byVenue = new Map<string, ScheduleEntry[]>();
-  const byDate = new Map<string, ScheduleEntry[]>();
-  for (const e of entries) {
-    if (e.venueKey) (byVenue.get(e.venueKey) ?? byVenue.set(e.venueKey, []).get(e.venueKey)!).push(e);
-    (byDate.get(e.weddingDate) ?? byDate.set(e.weddingDate, []).get(e.weddingDate)!).push(e);
-  }
-  cache = { entries, byVenue, byDate };
-  return cache;
+  return entries;
 }
 
 /** Force a reload on next lookup (e.g. after refreshing the snapshot). */
 export function invalidateScheduleCache(): void {
   cache = null;
+}
+
+/**
+ * Refresh the schedule LIVE from the Notion WEDDING SCHEDULE data source.
+ * No-op (returns false) if not configured. On success it replaces the cache, so
+ * weddings the team add in Notion are picked up automatically. Safe to call on a
+ * timer; falls back to the existing cache/CSV on any error.
+ */
+export async function refreshFromNotion(): Promise<boolean> {
+  const dsId = config.notion.weddingDataSourceId;
+  if (!dsId || !config.notion.apiKey) return false;
+  try {
+    const { Client } = await import('@notionhq/client');
+    const { proxyFetch } = await import('../bootstrap.js');
+    const notion = new Client({
+      auth: config.notion.apiKey,
+      ...(proxyFetch ? { fetch: proxyFetch as unknown as typeof fetch } : {}),
+    });
+
+    const entries: ScheduleEntry[] = [];
+    let cursor: string | undefined;
+    do {
+      const res: any = await (notion as any).dataSources.query({
+        data_source_id: dsId,
+        page_size: 100,
+        start_cursor: cursor,
+      });
+      for (const page of res.results as any[]) {
+        const p = page.properties ?? {};
+        const date = p['Wedding Date']?.date;
+        if (!date?.start) continue;
+        const venue = richText(p['Location']);
+        const pics: string[] = (p['PIC']?.people ?? [])
+          .map((u: any) => mapPic(u?.name ?? ''))
+          .filter((x: string | null): x is string => Boolean(x));
+        entries.push({
+          client: title(p['Client']),
+          contact: richText(p['Contact Person']),
+          venue,
+          venueKey: venueKey(venue),
+          pics: [...new Set(pics)].filter((x) => PIC_OPTIONS.includes(x)),
+          weddingDate: date.start.slice(0, 10),
+          weddingEnd: date.end ? date.end.slice(0, 10) : null,
+          status: p['Status']?.status?.name ?? '',
+        });
+      }
+      cursor = res.has_more ? res.next_cursor : undefined;
+    } while (cursor);
+
+    if (entries.length === 0) {
+      logger.warn('wedding schedule live refresh returned 0 rows — keeping CSV/cache');
+      return false;
+    }
+    buildIndex(entries);
+    liveLoaded = true;
+    logger.info({ count: entries.length }, 'wedding schedule refreshed LIVE from Notion');
+    return true;
+  } catch (err: any) {
+    logger.error({ err: err?.code ?? err?.message ?? err }, 'wedding schedule live refresh failed — using CSV/cache');
+    return false;
+  }
+}
+
+function title(prop: any): string {
+  return Array.isArray(prop?.title) ? prop.title.map((t: any) => t.plain_text).join('').trim() : '';
+}
+function richText(prop: any): string {
+  return Array.isArray(prop?.rich_text) ? prop.rich_text.map((t: any) => t.plain_text).join('').trim() : '';
+}
+
+/** Whether the current cache came from a live Notion read (vs the CSV snapshot). */
+export function isLive(): boolean {
+  return liveLoaded;
 }
 
 export function scheduleLoaded(): boolean {

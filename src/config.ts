@@ -21,6 +21,8 @@ export const config = {
     apiKey: process.env.NOTION_API_KEY ?? '',
     /** The "EXPENSES" data source id to write rows into (2025-09-03 API). */
     dataSourceId: process.env.NOTION_DATA_SOURCE_ID ?? '',
+    /** The "WEDDING SCHEDULE" data source id to READ (enrich missing date/PIC/venue). Empty = CSV only. */
+    weddingDataSourceId: process.env.NOTION_WEDDING_DATA_SOURCE_ID ?? '',
     /** 'preview' = log the row but DON'T write; 'live' = actually create the Notion row. */
     writeMode: (process.env.NOTION_WRITE ?? 'preview') as 'preview' | 'live',
     get hasToken(): boolean {

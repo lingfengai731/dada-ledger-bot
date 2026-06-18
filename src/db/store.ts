@@ -257,6 +257,32 @@ export const store = {
       .all(params) as { handler: string; total: number; count: number }[];
   },
 
+  /** Total recorded per PIC over a period (by invoice/wedding date). */
+  sumByPic(filters: { from?: string; to?: string }): { pic: string; total: number; count: number }[] {
+    const where: string[] = ['pic IS NOT NULL', "TRIM(pic) <> ''"];
+    const params: Record<string, unknown> = {};
+    if (filters.from) { where.push('COALESCE(invoice_date, wedding_date) >= @from'); params.from = filters.from; }
+    if (filters.to) { where.push('COALESCE(invoice_date, wedding_date) <= @to'); params.to = filters.to; }
+    return db
+      .prepare(
+        `SELECT pic, COALESCE(SUM(cost),0) AS total, COUNT(*) AS count
+         FROM expenses WHERE ${where.join(' AND ')} GROUP BY UPPER(pic) ORDER BY total DESC`,
+      )
+      .all(params) as { pic: string; total: number; count: number }[];
+  },
+
+  /** Period total + count by invoice/wedding date (for summaries). */
+  periodTotal(filters: { from?: string; to?: string }): { total: number; count: number } {
+    const where: string[] = [];
+    const params: Record<string, unknown> = {};
+    if (filters.from) { where.push('COALESCE(invoice_date, wedding_date) >= @from'); params.from = filters.from; }
+    if (filters.to) { where.push('COALESCE(invoice_date, wedding_date) <= @to'); params.to = filters.to; }
+    const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    return db
+      .prepare(`SELECT COALESCE(SUM(cost),0) AS total, COUNT(*) AS count FROM expenses ${clause}`)
+      .get(params) as { total: number; count: number };
+  },
+
   /** Sum/list expenses with optional filters. Dates filter on wedding_date. */
   sumExpenses(filters: { from?: string; to?: string; pic?: string; isWedding?: boolean }): {
     total: number;

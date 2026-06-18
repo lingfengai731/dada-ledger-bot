@@ -40,6 +40,14 @@ export const config = {
   /** Optional URL pinged every few minutes while WhatsApp is connected, so an
    * external monitor (e.g. healthchecks.io) can alert if the bot goes silent. */
   healthcheckUrl: process.env.HEALTHCHECK_URL ?? '',
+  summary: {
+    /** Boss WhatsApp id ("<countrycode><number>@c.us") to DM the periodic summary. Empty = off. */
+    bossWhatsappId: process.env.BOSS_WHATSAPP_ID ?? '',
+    /** 'weekly' (Mondays) or 'monthly' (1st). */
+    cadence: (process.env.SUMMARY_CADENCE ?? 'weekly') as 'weekly' | 'monthly',
+    /** Hour (Bali time, 0-23) to send on the due day. */
+    hour: Number(process.env.SUMMARY_HOUR ?? '9'),
+  },
   dryRun: bool(process.env.DRY_RUN, true),
   currency: process.env.CURRENCY ?? 'IDR',
   locale: process.env.LOCALE ?? 'id-ID',

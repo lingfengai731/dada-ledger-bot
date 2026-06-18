@@ -11,7 +11,9 @@ import { mergeToDraft, type ExpenseDraft } from '../expense.js';
 import { writeExpense } from '../notion/expenses.js';
 import { answerQuestion } from '../agents/queryAgent.js';
 import { enrichDraft, missingRequired, displayWeddingDate, displayPic } from '../schedule/enrich.js';
+import { buildPeriodSummary } from '../agents/report.js';
 import { formatMoney } from '../util/money.js';
+import { baliParts } from '../util/dates.js';
 import type { Receipt, WeddingNote } from '../types.js';
 
 const { Client, LocalAuth } = pkg;
@@ -105,6 +107,27 @@ export function createBot() {
     }
   }, 5 * 60 * 1000);
   heartbeat.unref?.();
+
+  // Periodic spend summary DM'd to the boss (weekly Mon / monthly 1st, Bali time).
+  // Off unless BOSS_WHATSAPP_ID is set. Checked every 20 min; sent once per due day.
+  let lastSummaryDate = '';
+  const summaryTimer = setInterval(async () => {
+    const bossId = config.summary.bossWhatsappId;
+    if (!bossId) return;
+    const { date, hour, weekday, dayOfMonth } = baliParts();
+    if (hour !== config.summary.hour) return;
+    const due = config.summary.cadence === 'monthly' ? dayOfMonth === 1 : weekday === 1;
+    if (!due || lastSummaryDate === date) return;
+    lastSummaryDate = date;
+    try {
+      const text = buildPeriodSummary(config.summary.cadence === 'monthly' ? 30 : 7);
+      if (!config.dryRun) await client.sendMessage(bossId, text);
+      logger.info({ bossId, cadence: config.summary.cadence }, 'periodic summary sent to boss');
+    } catch (err) {
+      logger.error({ err }, 'failed to send periodic summary');
+    }
+  }, 20 * 60 * 1000);
+  summaryTimer.unref?.();
 
   client.on('ready', async () => {
     logger.info('WhatsApp client ready ✅');
@@ -483,6 +506,21 @@ async function handleCommand(msg: WAMessage, body: string): Promise<void> {
   if (cmd === 'help') await reply(msg, INTRO_MESSAGE);
   else if (cmd === 'total') await reply(msg, await answerQuestion('What is the total spend this month?'));
   else if (cmd === 'ask' || cmd === 'q') await reply(msg, arg ? await answerQuestion(arg) : 'Usage: /ask <your question>');
+  else if (cmd === 'summary') await reply(msg, buildPeriodSummary(arg === 'month' ? 30 : 7));
+  else if (cmd === 'owed') await reply(msg, renderOwed(arg));
+}
+
+function renderOwed(handler: string): string {
+  const rows = store.owedByHandler({ handler: handler || undefined });
+  if (!rows.length) return handler ? `No recorded expenses for "${handler}".` : 'No expenses recorded yet.';
+  const lines = [`💸 *Paid by handler* (recorded, not net of reimbursements):`, ''];
+  let total = 0;
+  for (const r of rows) {
+    total += r.total;
+    lines.push(`• ${r.handler}: ${formatMoney(r.total)} ${config.currency} (${r.count})`);
+  }
+  if (rows.length > 1) lines.push('', `*TOTAL: ${formatMoney(total)} ${config.currency}*`);
+  return lines.join('\n');
 }
 
 async function reply(msg: WAMessage, text: string): Promise<void> {

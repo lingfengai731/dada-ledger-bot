@@ -17,6 +17,23 @@ export function baliTodayISO(): string {
   }).format(new Date());
 }
 
+/** Bali wall-clock parts for scheduling: date, hour (0-23), weekday (Sun=0…Sat=6), day-of-month. */
+export function baliParts(): { date: string; hour: number; weekday: number; dayOfMonth: number } {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: BALI_TZ,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', hourCycle: 'h23', weekday: 'short',
+  }).formatToParts(new Date());
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+  const wk: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return {
+    date: `${get('year')}-${get('month')}-${get('day')}`,
+    hour: Number(get('hour')),
+    weekday: wk[get('weekday')] ?? -1,
+    dayOfMonth: Number(get('day')),
+  };
+}
+
 /** Human-readable Bali wall-clock, e.g. "Thursday, 18 June 2026, 11:24". */
 export function baliNowText(): string {
   return new Intl.DateTimeFormat('en-GB', {

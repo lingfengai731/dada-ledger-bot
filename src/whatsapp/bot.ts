@@ -13,7 +13,7 @@ import { answerQuestion } from '../agents/queryAgent.js';
 import { enrichDraft, missingRequired, displayWeddingDate, displayPic } from '../schedule/enrich.js';
 import { buildPeriodSummary } from '../agents/report.js';
 import { formatMoney } from '../util/money.js';
-import { baliParts } from '../util/dates.js';
+import { baliParts, baliNowText } from '../util/dates.js';
 import type { Receipt, WeddingNote } from '../types.js';
 
 const { Client, LocalAuth } = pkg;
@@ -114,6 +114,7 @@ export function createBot() {
   // Heartbeat: every 5 min log the connection state, and (if HEALTHCHECK_URL is
   // set) ping it while connected so an external monitor alerts if pings stop —
   // this works even when WhatsApp/the server is down, which in-app alerts can't.
+  let lastHealthy = true;
   const heartbeat = setInterval(async () => {
     let state = 'UNKNOWN';
     try {
@@ -121,7 +122,8 @@ export function createBot() {
     } catch {
       state = 'UNREACHABLE';
     }
-    if (state === 'CONNECTED') {
+    const healthy = state === 'CONNECTED';
+    if (healthy) {
       if (config.healthcheckUrl) {
         try {
           await fetch(config.healthcheckUrl);
@@ -129,9 +131,22 @@ export function createBot() {
           logger.warn({ err }, 'healthcheck ping failed');
         }
       }
+      // Recovered from a previous bad state → tell the boss it's back (a
+      // "down" DM can't be sent while WhatsApp itself is down).
+      if (!lastHealthy) {
+        for (const id of bossIds()) {
+          try {
+            await client.sendMessage(id, `✅ DADA Ledger Bot reconnected — ${baliNowText()}.`);
+          } catch {
+            /* ignore */
+          }
+        }
+        logger.info('WhatsApp recovered — boss notified');
+      }
     } else {
       logger.error({ state }, '🚨 WhatsApp not connected');
     }
+    lastHealthy = healthy;
   }, 5 * 60 * 1000);
   heartbeat.unref?.();
 

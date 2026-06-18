@@ -1,170 +1,196 @@
 # DADA Ledger Bot 🧾🤖
 
-挂在你 WhatsApp 群里的智能报账机器人。自动读取群里发的收据照片(含手写)、算出金额、在群里发出报账、同步 Notion,并能直接在群里问它"这个月花了多少"。
+挂在 WhatsApp 群里的智能报账机器人,为 **DADA Island**(巴厘岛婚礼布置 / 花艺)而建。
+它自动读取群里发的收据照片(多为手写印尼文)+ 员工随附的文字说明,识别金额、判断归属哪场婚礼、
+在群里发出确认摘要,员工回 `ok` 后写入公司现有的 Notion 账本,并能在群里回答"这个月花了多少"。
 
-- **WhatsApp 接入**:whatsapp-web.js(扫码挂在你手机的 WhatsApp 上)
-- **识别 + 问答**:Claude(`claude-opus-4-8`,擅长手写 + 印尼文)
-- **存储**:本地 SQLite + 可选 Notion
-- **技术栈**:Node.js / TypeScript
+- **WhatsApp 接入**:whatsapp-web.js(以独立账号 **DADA_BOT** 扫码挂载)
+- **识别 + 解析 + 问答**:Claude(`claude-opus-4-8`,擅长手写 + 印尼文 + 视觉)
+- **账本**:公司现有 Notion 数据库(系统的唯一真相)+ 本地 SQLite 镜像
+- **技术栈**:Node.js / TypeScript,better-sqlite3,pm2
 
----
-
-## 一、准备
-
-需要先装好(只装一次):
-- [Node.js](https://nodejs.org/) 20 或更高(命令行输入 `node -v` 能看到版本号即可)
-- 一个 Claude API key(在 [console.anthropic.com](https://console.anthropic.com) → API Keys 创建)
-- 一部装着 WhatsApp、且加入了目标群的手机
+> 现状:**已部署在新加坡 Vultr 服务器上 7×24 运行**(pm2 进程 `dada-bot`),目前指向测试群,验证后切真实 DADA 群上线。
 
 ---
 
-## 二、安装
+## 一、它是怎么工作的(数据流)
 
-在项目目录里打开终端(PowerShell):
+```
+群里收到 [收据照片] + [文字说明]      （两者作为相邻的不同消息配对)
+      │
+      ▼
+ Vision Agent     收据图 → 结构化(商家/金额/日期)         src/agents/visionAgent.ts
+ Message Parser   文字 → 结构化(发票日/婚期/PIC/场地/付款人) src/agents/messageParser.ts
+      │            （一条消息可含多笔支出,自动拆分)
+      ▼
+ mergeToDraft     图 + 文字合并成一条「支出草稿」            src/expense.ts
+      ▼
+ enrichDraft      ★ 智能补全(见第二节)                    src/schedule/enrich.ts
+      ▼
+ 群内确认摘要  ──  员工回 ok / cancel / 或补充缺失信息
+      ▼
+ writeExpense     写入 Notion EXPENSES + 本地 SQLite        src/notion/expenses.ts
+```
+
+群内问答:`/ask <问题>`、`/total`、`/help` → `src/agents/queryAgent.ts`
+
+---
+
+## 二、★ 智能补全(2026-06 升级)
+
+员工写的收据说明经常**缺婚期、缺 PIC、甚至日期写错**。机器人据以下顺序自动补:
+
+1. **场地优先**:认得的场地(komaneka / pandawa / samabe…)⇒ 判定为婚礼。
+   场地对应的**日程表日期会压过员工手写的日期**——因为一张 komaneka 的收据不可能属于别处的婚礼。
+   > 例:`06/15 mitir 06/15 1.000.000 putu (komaneka)` → 婚期自动修正为 **2026-06-16**、PIC 自动填 **CHRISTI**。
+2. **婚礼日程表**(`data/wedding-schedule.csv`):DADA 人工维护的婚礼主表(客户/场地/PIC/日期)。
+   按 场地 + 离发票日最近的日期 匹配出是哪场婚礼,补全婚期与 PIC。
+   - PIC 映射:`putri→PUTRI`、`Andrian Christi→CHRISTI`、`Jessica Earvin→JAY`、`DĀDA ISLAND→GENERAL`、`ling→LING`。
+3. **上下文记忆**(`src/schedule/contextMemory.ts`):14 天滚动记忆。同一天同事发的同场地/同 PIC 单子已含婚期的,
+   后面没写婚期的可借用(实现"有人写了、有人没写,机器人自己推断")。
+4. **巴厘岛实时日期**:解析以 `Asia/Makassar`(UTC+8)的"今天"为准(`src/util/dates.ts` 的 `baliTodayISO()`)。
+
+### 老板的强制规则(必须满足才允许保存)
+> 婚礼支出**必须**同时有 **婚礼日期** 和 **organiser(PIC)**。
+
+- 补全后仍缺的,摘要里显示 `???`,且**回 `ok` 也拒绝保存**,提示员工补。
+- 员工随后补一句(如 `16/06 christi`)会**合并进原草稿**(不会冲掉已读到的收据),补全后即可 `ok`。
+- 非婚礼支出(general / shop)不受此限制。
+
+> ⚠️ 当前婚礼日程表读的是**导出的 CSV 快照**。要做到**实时**读取 Notion 的 WEDDING SCHEDULE,
+> 需老板把该 Notion 页面也分享给 `DADA Ledger Bot` 集成;代码已预留,分享后改一处配置即可切实时。
+
+---
+
+## 三、Notion 写入
+
+- **写入目标(固定)**:`INVOICE2026` 数据库 → 数据源 **`EXPENSES 2026`**(id `cec25f1b-255a-8390-b86b-076832d4f087`)。
+  与历史账本 `INVOICE` / `EXPENSES`(`27925f1b…`)分开,机器人**从不**写历史账本。
+- **API**:Notion 2025-09-03 多数据源 API,`@notionhq/client` v5,
+  `pages.create({ parent: { type:'data_source_id', data_source_id } })`。
+- **写入的列**:
+
+  | 列 | 来源 |
+  |---|---|
+  | `VENDOR / DESCRIPTION`(标题) | 说明/商家,**大写**(沿用账本风格) |
+  | `COST` 和 `PRICE` | 金额(两列同值,沿用账本风格) |
+  | `INVOICE DATE` | 发票/购买日 |
+  | `WEDDING DATE` | 婚期(婚礼单才写;经智能补全) |
+  | `PIC`(multi_select) | 婚礼负责人 `LING/JAY/CHRISTI/PUTRI/GENERAL`,别名 `jessica/jesicha→JAY` |
+  | `HANDLER`(multi_select) | 付款人/待报销人(`by/tf/trf <名字>`) |
+
+- **保证**:婚礼行不会再带空的 `WEDDING DATE` 或 `PIC`(被拦截规则挡住)。
+- `preview` 模式只打印不写;`live` 模式真正创建行。由 `.env` 的 `NOTION_WRITE` 控制。
+
+---
+
+## 四、配置 `.env`
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_MODEL=claude-opus-4-8
+
+WHATSAPP_GROUP_ID=120363426839508686@g.us   # 测试群;上线改成真实 DADA 群
+TRIGGER_MODE=auto                            # 报账专用群:任意收据/金额/日期都视为提交
+DRY_RUN=false                                # true=只读不发(本地调试用)
+
+NOTION_API_KEY=ntn_...
+NOTION_DATA_SOURCE_ID=cec25f1b-255a-8390-b86b-076832d4f087   # EXPENSES 2026
+NOTION_WRITE=live                            # live=真写入;preview=只预览
+
+PROXY_URL=http://127.0.0.1:7890   # 仅中国大陆本地需要(Node 不走系统代理);服务器留空
+```
+
+> 中国大陆本地运行必须设 `PROXY_URL`,否则 Anthropic/Notion 会 403。服务器在新加坡,留空直连。
+
+---
+
+## 五、本地运行 / 调试
 
 ```powershell
 npm install
+npm run dev        # 启动(改代码自动重启);首次会弹二维码,用 DADA_BOT 手机扫
 ```
 
-（已经装过就跳过。）
+> ⚠️ **同一个 DADA_BOT 账号同时只能有一个实例**。服务器已在跑时,**不要**本地 `npm run dev`,否则互相挤掉登录。
+> 调试解析/补全请用下面的离线 CLI,不会碰 WhatsApp 会话。
 
----
-
-## 三、配置 `.env`
-
-项目里已经有一个 `.env` 文件(从 `.env.example` 复制来的)。用记事本或 VS Code 打开它,**只需先填一项**:
-
-```
-ANTHROPIC_API_KEY=sk-ant-把你的key粘贴到这里
-```
-
-其余先保持默认。重点确认这两行默认值:
-
-```
-WHATSAPP_GROUP_NAME=DADA - Financial Report Group   # 必须和群名一字不差
-DRY_RUN=true                                         # 先只读不发,核对准确度
-```
-
-> Notion 暂时不用管,`NOTION_*` 留空即可,等本地验证 OK 再接。
-
----
-
-## 四、首次启动 + 扫码登录
+### 离线测试 CLI(不发群、不抢会话)
 
 ```powershell
-npm run dev
+npm run typecheck                                  # 类型检查
+npx tsx src/cli/eval-schedule.ts                   # 婚礼日程表补全 + 拦截规则(纯离线)
+npx tsx src/cli/eval-pipeline.ts "06/15 mitir 06/15 1.000.000 putu (komaneka)"  # 解析+补全全流程
+npx tsx src/cli/notion-schema.ts                   # 打印可访问的 Notion 数据源结构
+npx tsx src/cli/eval-notes.ts "<导出的 _chat.txt 路径>"   # 在真实聊天记录上跑解析器
+npm run ask -- "这个月花了多少?"                    # 命令行问答
 ```
-
-终端会弹出一个二维码。用手机:**WhatsApp → 设置 → 已链接的设备 → 链接设备 → 扫这个二维码**。
-
-登录成功后,终端会打印出你所有群的 id,类似:
-
-```
-DADA - Financial Report Group  ->  120363012345678901@g.us
-```
-
-把 `DADA` 群对应的那串 `xxxx@g.us` 复制,粘到 `.env` 的:
-
-```
-WHATSAPP_GROUP_ID=120363012345678901@g.us
-```
-
-> 填了 `WHATSAPP_GROUP_ID` 后,锁定的就是这个群,比靠群名匹配更稳。改完按 `Ctrl+C` 停掉,再 `npm run dev` 重启。
 
 ---
 
-## 五、干跑验证(DRY_RUN,关键一步)
+## 六、服务器(已上线)
 
-在 `DRY_RUN=true` 状态下,往群里发一张**真实收据照片**。机器人会读图、识别,然后把结果**打印在终端**(不会发到群里):
+- 机器:Vultr 新加坡,`207.148.68.180`,Ubuntu 24.04,Node 22 + google-chrome-stable。
+- 路径:`/opt/dada-ledger-bot`,进程:pm2 `dada-bot`(`npm run start` → `tsx src/index.ts`),开机自启。
+- 管理(从本地用 SSH key):
 
+  ```bash
+  ssh -i ~/.ssh/dada_deploy -o StrictHostKeyChecking=no root@207.148.68.180
+  pm2 logs dada-bot          # 看日志
+  pm2 restart dada-bot       # 重启
+  ```
+
+### 更新部署(无新依赖时)
+
+```bash
+# 本地:打包 src + 婚礼表快照
+tar czf /tmp/dada-update.tgz src data/wedding-schedule.csv
+scp -i ~/.ssh/dada_deploy /tmp/dada-update.tgz root@207.148.68.180:/tmp/
+# 服务器:解包并重启
+ssh -i ~/.ssh/dada_deploy root@207.148.68.180 \
+  "cd /opt/dada-ledger-bot && tar xzf /tmp/dada-update.tgz && pm2 restart dada-bot"
 ```
-🧾 Receipt read automatically
-*Fuad Flower Shop #02728 (2026-06-06) → DADA*
-   • 5× Amaranthus Viridis: 500.000
-   _Subtotal: 500.000_
-*TOTAL: 500.000 IDR*
-(DRY_RUN preview — not actually posted to the group)
+
+### 正式上线(切真实 DADA 群)
+
+```bash
+ssh ... "cd /opt/dada-ledger-bot && \
+  sed -i 's|^WHATSAPP_GROUP_ID=.*|WHATSAPP_GROUP_ID=120363284134868849@g.us|' .env && \
+  pm2 restart dada-bot"
 ```
 
-**核对金额是否和你人工算的一致**,尤其注意千分位(`500.000` 应是五十万,不是 500)。多发几张不同收据测试。
+> 前提:DADA_BOT 已被拉进真实群。进群后机器人会自动发中英双语自我介绍。
 
 ---
 
-## 六、测试问答(不依赖 WhatsApp)
+## 七、Roadmap
 
-```powershell
-npm run ask -- "这个月在 Fuad 花了多少?"
-npm run ask -- "How much did we spend this month?"
-```
-
-它会基于已入库的收据回答。
-
----
-
-## 七、转为正式运行(开始真发群消息)
-
-识别都准了之后,把 `.env` 改成:
-
-```
-DRY_RUN=false
-```
-
-重启 `npm run dev`。从此机器人会:
-- 自动读群里新发的收据 → 在群里回发报账 + TOTAL
-- 响应群内命令:
-  - `/ask <问题>` —— 例:`/ask 这个月一共花了多少?`
-  - `/total` —— 本月总额
-  - `/help` —— 查看命令
+- [x] 读群里收据照片(含手写、一图多单)→ 自动识别
+- [x] 图 + 文字配对解析(发票日 / 婚期 / PIC / 场地 / 付款人)
+- [x] 确认后写入 Notion EXPENSES(invoice2026)+ 本地 SQLite
+- [x] 群内自然语言问答(`/ask` `/total`),入群双语自我介绍
+- [x] **婚礼日程表智能补全 + 场地优先 + 上下文记忆 + 巴厘岛时间**
+- [x] **强制规则:婚期/organiser 缺失显示 `???` 并拒绝保存**
+- [x] 部署新加坡 VPS,7×24 在线
+- [ ] 婚礼日程表**实时**读取(待老板把 WEDDING SCHEDULE 页面分享给集成)
+- [ ] (可选)只读网页仪表盘 / 原生 App
 
 ---
 
-## 八、(可选)接入 Notion
+## 八、数据 & 隐私
 
-1. 到 [notion.com/my-integrations](https://www.notion.com/my-integrations) 建一个 internal integration,拿到 secret。
-2. 在 Notion 建一个数据库(账本),列名建议:
-   `Name`(标题)、`Date`(日期)、`Vendor`(文本)、`Recipient`(文本)、`Invoice`(文本)、`Total`(数字)、`Items`(文本)、`Confidence`(数字)。
-3. 把该数据库「Share」给你的 integration。
-4. 从数据库 URL 里复制 database id。
-5. 填进 `.env`:
-   ```
-   NOTION_API_KEY=secret_xxx
-   NOTION_DATABASE_ID=xxxxxxxx
-   ```
-6. 重启。之后每张收据会自动在 Notion 生成一条记录。
-
----
-
-## 九、(以后)上服务器 7×24
-
-本地跑通后,想做到关电脑也不漏消息,把整个项目搬到一台一直开机的机器(迷你主机 / 小 VPS):
-1. 装 Node.js,`npm install`。
-2. 拷贝你的 `.env`(注意 `.wwebjs_auth/` 目录也一起带过去,可免重新扫码)。
-3. 用 `pm2` 之类的进程守护让它后台常驻:`npm i -g pm2 && pm2 start "npm run start" --name dada-bot`。
-
----
-
-## Roadmap(规划)
-
-- [x] 读取群里收据照片(含手写、一图多单)→ 自动识别 + 报账
-- [x] 本地数据库存储(SQLite)+ 可选 Notion 同步
-- [x] 群内自然语言问答(`/ask` `/total`)
-- [x] 入群自动自我介绍(英文 + 印尼语)
-- [ ] **Phase 2 — 自建网页仪表盘(替代 Notion)**:在现有数据库之上做一个**响应式网页**(电脑 + 手机浏览器通用,无需上架 App Store),自动展示每一笔收据、按月/商家/收件人筛选、总额与图表、导出 Excel。机器人已经把数据存进 `data/ledger.db`,这一步是自然延伸。
-- [ ] Phase 3 — 部署到新加坡 VPS,7×24 在线
-- [ ] (可选)原生 iOS App
+- 本地账本镜像:`data/ledger.db`;收据图片:`data/images/`
+- 婚礼日程表快照:`data/wedding-schedule.csv`(公司私有,**不进 git**)
+- WhatsApp 登录态:`.wwebjs_auth/`
+- `.env`、`data/`、`.wwebjs_auth/`、聊天导出 均已被 `.gitignore` 排除,不会进 git。
 
 ## 常用命令
 
 | 命令 | 作用 |
 |---|---|
-| `npm run dev` | 开发模式启动(改代码自动重启) |
-| `npm run start` | 普通启动 |
-| `npm run ask -- "问题"` | 命令行测问答 |
-| `npm run typecheck` | 检查类型错误 |
-
-## 数据 & 隐私
-
-- 本地数据库:`data/ledger.db`
-- 收据图片:`data/images/`
-- WhatsApp 登录态:`.wwebjs_auth/`
-- `.env`、`data/`、`.wwebjs_auth/` 都已被 `.gitignore` 排除,不会进 git。
+| `npm run start` | 普通启动(服务器用) |
+| `npm run dev` | 开发模式(改代码自动重启) |
+| `npm run typecheck` | 类型检查 |
+| `npm run ask -- "问题"` | 命令行问答 |
+| `npx tsx src/cli/eval-schedule.ts` | 离线测试婚礼补全 + 拦截 |
+| `npx tsx src/cli/eval-pipeline.ts "<说明>"` | 解析 + 补全全流程 |

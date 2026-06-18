@@ -43,6 +43,8 @@ export const config = {
     dbFile: path.join(DATA_DIR, 'ledger.db'),
     imagesDir: path.join(DATA_DIR, 'images'),
     waAuthDir: path.resolve('./.wwebjs_auth'),
+    /** Local snapshot of the Notion WEDDING SCHEDULE used to fill missing wedding date / PIC / venue. */
+    weddingScheduleCsv: path.join(DATA_DIR, 'wedding-schedule.csv'),
   },
 } as const;
 

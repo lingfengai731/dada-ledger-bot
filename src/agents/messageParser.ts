@@ -1,6 +1,6 @@
 import { claude, MODEL } from '../llm/claude.js';
 import { logger } from '../logger.js';
-import { todayISO } from '../util/dates.js';
+import { baliTodayISO } from '../util/dates.js';
 import type { WeddingNote } from '../types.js';
 
 /**
@@ -17,8 +17,9 @@ function buildSystem(): string {
   return `You parse short WhatsApp notes from DADA Island staff (a wedding decor/florist
 business in Bali, Indonesia) that accompany purchase receipts. Extract clean structured data.
 
-Today is ${todayISO()}. All dates are in 2026. Money uses "." or "," as the THOUSANDS
-separator: "82,500" = 82500, "2.115.750" = 2115750, "1,029,665" = 1029665. Output integers.
+Today is ${baliTodayISO()} (Bali / WITA time — that is the staff's "now"). All dates are
+in 2026 unless a year is written. Money uses "." or "," as the THOUSANDS separator:
+"82,500" = 82500, "2.115.750" = 2115750, "1,029,665" = 1029665. Output integers.
 
 DATE FORMAT VARIES BY PERSON: some write month/day ("06/13"), others day/month ("13/06").
 Both mean 13 June. Use the value that yields a valid 2026 date; when ambiguous, prefer the
@@ -36,7 +37,10 @@ CATEGORY — set exactly one:
   "Reimbursement", "for stocks". Leave weddingDate null.
 - "shop": for the retail shop — markers include "for shop", "shop=", "Wish for shop". weddingDate null.
 - "wedding": everything else (the default for this business). It IS a wedding when there's a
-  venue, a wedding date, or a PIC.
+  venue, a wedding date, or a PIC. A VENUE is any hotel/villa/resort/estate/place name —
+  often in parentheses, e.g. "(komaneka)", "(pandawa)", "(samabe)", "(The Seed)". When you
+  see such a place name, set category "wedding" and put it in "location" (even if no wedding
+  date is written — the wedding date can be filled in later from the schedule).
 
 LOCATION & PIC:
 - "(pandawa)" → location only.

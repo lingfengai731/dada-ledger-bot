@@ -6,10 +6,11 @@ import { config } from '../config.js';
 import { logger } from '../logger.js';
 import { store } from '../db/store.js';
 import { extractReceipts } from '../agents/visionAgent.js';
-import { parseEmployeeNotes } from '../agents/messageParser.js';
+import { parseEmployeeNotes, parseEmployeeNote } from '../agents/messageParser.js';
 import { mergeToDraft, type ExpenseDraft } from '../expense.js';
 import { writeExpense } from '../notion/expenses.js';
 import { answerQuestion } from '../agents/queryAgent.js';
+import { enrichDraft, missingRequired, displayWeddingDate, displayPic } from '../schedule/enrich.js';
 import { formatMoney } from '../util/money.js';
 import type { Receipt, WeddingNote } from '../types.js';
 
@@ -42,6 +43,8 @@ const INTRO_MESSAGE = [
   '',
   "📸 Just post the *receipt photo* with a short note (date, amount, who it's for) — the way you already do. I'll read it, show you a quick summary, and save it to the ledger once you reply *ok*. You can list several expenses in one message too.",
   '   e.g. _06/15 gosend kyea 06/16 115.500 putu (komaneka)_',
+  '',
+  '💍 For weddings I always need a *wedding date* and an *organiser (PIC)*. If you leave them out I\'ll try to fill them from the schedule; if I still show *???*, just reply with them before you confirm.',
   '',
   '🧾 You can also ask me: */total*, */ask <question>*, */help*.',
   '',
@@ -145,6 +148,9 @@ async function handleMessage(msg: WAMessage): Promise<void> {
       await reply(msg, '🗑️ Cancelled — nothing was saved.');
       return;
     }
+    // Anything else while a draft is pending is a correction (e.g. "christi", "16/06").
+    await onNote(msg, sender, stripKeyword(body));
+    return;
   }
 
   const alreadyCollecting = collecting.has(sender);
@@ -185,13 +191,35 @@ async function onNote(msg: WAMessage, sender: string, text: string): Promise<voi
   if (!text) return;
   const pending = recentPending(sender);
   if (pending && pending.drafts.length === 1) {
-    const notes = await parseEmployeeNotes(text);
-    await finalize(msg, sender, notes, pending.receipt, pending.imagePath, ['Updated with your note.']);
+    const follow = await parseEmployeeNote(text);
+    const looksComplete = follow.amount != null && Boolean(follow.description);
+    if (looksComplete) {
+      // A full new expense (has its own amount + description) — rebuild from it.
+      await finalize(msg, sender, [follow], pending.receipt, pending.imagePath, ['Updated with your note.']);
+    } else {
+      // A partial follow-up = a correction (e.g. "0616 christi"). Merge it in.
+      applyCorrection(pending.drafts[0], follow);
+      enrichDraft(pending.drafts[0]);
+      pending.ts = Date.now();
+      await reply(msg, renderSummary(pending.drafts));
+    }
     return;
   }
   const c = getCollecting(sender, msg);
   c.noteText = c.noteText ? `${c.noteText} ${text}` : text;
   schedule(sender);
+}
+
+/** Overlay corrective fields from a follow-up note onto an existing draft. */
+function applyCorrection(draft: ExpenseDraft, c: WeddingNote): void {
+  if (c.weddingDate) draft.weddingDate = c.weddingDate;
+  if (c.invoiceDate) draft.invoiceDate = c.invoiceDate;
+  if (c.pic) draft.pic = c.pic;
+  if (c.location) draft.location = c.location;
+  if (c.buyer) draft.handler = c.buyer;
+  if (c.description) draft.vendorDescription = c.description;
+  if (c.amount != null) draft.cost = c.amount;
+  if (c.weddingDate || c.pic || c.category === 'wedding' || c.isWedding) draft.isWedding = true;
 }
 
 function recentPending(sender: string): Pending | null {
@@ -275,6 +303,8 @@ async function finalize(
   const drafts = notes.map((n, i) => {
     const d = mergeToDraft(n, i === 0 ? receipt : null, i === 0 ? imagePath : null);
     if (i === 0) d.warnings.push(...extraWarnings);
+    // Fill missing wedding date / PIC from the schedule + recent context.
+    enrichDraft(d);
     return d;
   });
   pendingDrafts.set(sender, { drafts, notes, receipt, imagePath, ts: Date.now(), waMessageId: msg.id._serialized });
@@ -284,6 +314,24 @@ async function finalize(
 async function commit(msg: WAMessage, sender: string): Promise<void> {
   const pending = pendingDrafts.get(sender);
   if (!pending) return;
+
+  // Boss's rule: a wedding expense must have BOTH a wedding date and an organiser
+  // (PIC). If anything is still ???, refuse to save and ask the staff to fill it in.
+  const blocked = pending.drafts
+    .map((d, i) => ({ i, missing: missingRequired(d) }))
+    .filter((x) => x.missing.length);
+  if (blocked.length) {
+    pending.ts = Date.now(); // keep the draft alive so they can correct it
+    const lines = ['🚫 *Not saved yet — missing required info:*', ''];
+    for (const b of blocked) {
+      const label = pending.drafts.length > 1 ? `*${b.i + 1}.* ` : '';
+      lines.push(`${label}Please provide the *${b.missing.join('* and *')}*.`);
+    }
+    lines.push('', 'Just reply with the missing detail (e.g. _16/06 christi_) and I\'ll update it, then reply *ok*.');
+    await reply(msg, lines.join('\n'));
+    return;
+  }
+
   pendingDrafts.delete(sender);
 
   let savedToNotion = 0;
@@ -323,13 +371,22 @@ function renderSummary(drafts: ExpenseDraft[]): string {
   let total = 0;
   drafts.forEach((d, i) => {
     total += d.cost ?? 0;
-    const tag = d.isWedding ? `wed ${d.weddingDate ?? '?'}` : 'non-wedding';
+    const inv = d.invoiceDate ? `inv ${d.invoiceDate}` : 'inv —';
+    const tag = d.isWedding ? `${inv} · wed ${displayWeddingDate(d)} · ${displayPic(d)}` : `${inv} · non-wedding`;
     lines.push(`*${i + 1}.* ${d.vendorDescription ?? '—'} — ${formatMoney(d.cost)} _(${tag})_`);
   });
   lines.push('', `*TOTAL: ${formatMoney(total)} ${config.currency}*`);
+  const fills = drafts.flatMap((d) => d.info);
+  if (fills.length) lines.push('', 'ℹ️ ' + fills.join('\nℹ️ '));
   const warns = drafts.flatMap((d) => d.warnings);
   if (warns.length) lines.push('', '⚠️ ' + warns.join('\n⚠️ '));
-  lines.push('', 'Reply *ok* to save all, *cancel* to discard.');
+
+  const stillMissing = drafts.some((d) => missingRequired(d).length);
+  if (stillMissing) {
+    lines.push('', '🚫 Some expenses still show *???* — reply with the missing *wedding date* / *organiser* before I can save.');
+  } else {
+    lines.push('', 'Reply *ok* to save all, *cancel* to discard.');
+  }
   return lines.join('\n');
 }
 
@@ -337,16 +394,29 @@ function renderOne(draft: ExpenseDraft): string {
   const lines: string[] = ['🧾 *Please confirm this expense:*', ''];
   lines.push(`*Vendor / description:* ${draft.vendorDescription ?? '—'}`);
   lines.push(`*Cost:* ${formatMoney(draft.cost)} ${config.currency}`);
+  // Invoice date (when the receipt was issued) is always shown.
+  lines.push(`*Invoice date:* ${draft.invoiceDate ?? '—'}`);
   if (draft.isWedding) {
-    lines.push(`*Wedding date:* ${draft.weddingDate ?? '❓ missing'}`);
-    lines.push(`*PIC:* ${draft.pic ?? '—'}`);
+    // Boss's rule: wedding date & organiser are always shown; ??? when missing.
+    lines.push(`*Wedding date:* ${displayWeddingDate(draft)}`);
+    lines.push(`*Organiser (PIC):* ${displayPic(draft)}`);
   } else {
     lines.push('*Type:* non-wedding');
   }
-  if (draft.invoiceDate) lines.push(`*Invoice date:* ${draft.invoiceDate}`);
-  if (draft.handler) lines.push(`*Handler (buyer):* ${draft.handler}`);
+  if (draft.handler) lines.push(`*Buyer (Handler):* ${draft.handler}`);
+  if (draft.info.length) lines.push('', 'ℹ️ ' + draft.info.join('\nℹ️ '));
   if (draft.warnings.length) lines.push('', '⚠️ ' + draft.warnings.join('\n⚠️ '));
-  lines.push('', `Reply *ok* to save, *cancel* to discard, or just resend with the correction.`);
+
+  const missing = missingRequired(draft);
+  if (missing.length) {
+    lines.push(
+      '',
+      `🚫 *Cannot save yet* — please provide the *${missing.join('* and *')}*.`,
+      `Reply with it (e.g. _16/06 christi_) and I'll update, then reply *ok*.`,
+    );
+  } else {
+    lines.push('', `Reply *ok* to save, *cancel* to discard, or resend with a correction.`);
+  }
   return lines.join('\n');
 }
 

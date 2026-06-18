@@ -18,11 +18,15 @@ export interface ExpenseDraft {
   pic: string | null;
   /** Raw HANDLER / buyer name ("by X"), mapped at write time. */
   handler: string | null;
+  /** Venue / location from the note (used to match the wedding schedule). Not written to Notion. */
+  location: string | null;
   /** false → leave the wedding fields blank in Notion. */
   isWedding: boolean;
   confidence: number;
   /** Things the human should double-check before confirming. */
   warnings: string[];
+  /** What the bot auto-filled (schedule/context lookups), shown for sanity-check. */
+  info: string[];
   /** Provenance, kept for storage / audit. */
   imagePath: string | null;
   rawNote: string;
@@ -67,9 +71,11 @@ export function mergeToDraft(
     cost,
     pic: note.pic,
     handler: note.buyer,
+    location: note.location,
     isWedding,
     confidence: Math.min(note.confidence, receipt?.confidence ?? 1),
     warnings,
+    info: [],
     imagePath,
     rawNote: note.rawText,
   };

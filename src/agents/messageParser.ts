@@ -12,11 +12,12 @@ import type { WeddingNote } from '../types.js';
 const PIC_OPTIONS = ['LING', 'JAY', 'CHRISTI', 'PUTRI', 'GENERAL'];
 const STAFF = [...PIC_OPTIONS, 'RANIA', 'MINGGU', 'PUTU', 'MADE', 'JESICHA', 'HAMZAH', 'JESSICA', 'ANTA WAYAN', 'IPUTU'];
 const VENUES = [
-  'Pandawa', 'Komaneka', 'Samabe', 'The Seed', 'Lombok', 'Ungasan', 'Alila Uluwatu',
-  'Soori', 'Villa Vedas', 'Khayangan', 'Glamp Nusa', 'Sky Ayana', 'Ayana',
-  'Four Seasons Jimbaran', 'W Seminyak', 'Conrad', 'Wonderland Uluwatu', 'Mandapa',
-  'Raffles', 'Maya', 'Six Senses', 'Tirtha', 'Ritz-Carlton', 'Stone Villa',
-  'Plenilunio', 'Jeeva Saba', 'Mulia', 'Noku', 'Bambu Indah', 'Umana', 'Potato Head',
+  'Pandawa', 'Komaneka', 'Komaneka Keramas', 'Samabe', 'The Seed', 'Lombok', 'Ungasan',
+  'Alila Uluwatu', 'Soori', 'Villa Vedas', 'Villa Pemutih', 'Khayangan', 'Glamp Nusa',
+  'Ayana', 'Ayana Sky', 'Four Seasons Jimbaran', 'W Seminyak', 'Conrad', 'Wonderland Uluwatu',
+  'Mandapa Ubud', 'Raffles', 'Maya', 'Six Senses', 'Tirtha', 'Ritz-Carlton', 'Stone Uluwatu',
+  'Noku Beach House', 'Bambu Indah', 'Canggu Wooden', 'Plenilunio', 'Jeeva Saba', 'Mulia',
+  'Umana', 'Potato Head',
 ];
 
 function buildSystem(): string {
@@ -69,9 +70,13 @@ LOCATION & PIC:
 Known venues: ${VENUES.join(', ')}. Known staff: ${STAFF.join(', ')}.
 
 PIC vs BUYER (two different people):
-- pic = the WEDDING's person-in-charge. It is exactly one of: LING, JAY, CHRISTI, PUTRI, GENERAL.
-  Found after the dash in "(Location-PIC)", or as "ling's", etc. NOTE: "jessica" is the same
-  person as JAY — output JAY. May be absent — that's fine. Use GENERAL for non-wedding.
+- pic = the WEDDING's person-in-charge. Output EXACTLY one canonical value: LING, JAY,
+  CHRISTI, PUTRI, or GENERAL. Found after the dash in "(Location-PIC)", or as "ling's", etc.
+  NORMALIZE loose spellings staff actually use:
+    • jessica / jesicca / jesicha / earvin → JAY
+    • christy / christie / christi / andrian → CHRISTI
+    • putri / radityasari → PUTRI
+  May be absent — that's fine. Use GENERAL for non-wedding/studio/office.
 - buyer = who PAID for it (to be reimbursed) = the HANDLER. Appears near "by <name>", "tf <name>",
   "<name> TRF/trf", or as a trailing name (putu, Minggu, putri, rania…). "TRF"/"tf" = bank transfer.
 

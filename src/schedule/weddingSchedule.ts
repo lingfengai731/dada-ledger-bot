@@ -44,8 +44,8 @@ const PIC_OPTIONS = ['LING', 'JAY', 'CHRISTI', 'PUTRI', 'GENERAL'];
 function mapPic(raw: string): string | null {
   const s = raw.toLowerCase();
   if (s.includes('putri') || s.includes('radityasari')) return 'PUTRI';
-  if (s.includes('christi') || s.includes('andrian')) return 'CHRISTI';
-  if (s.includes('jessica') || s.includes('earvin') || s.includes('jay')) return 'JAY';
+  if (s.includes('christ') || s.includes('andrian')) return 'CHRISTI'; // christi/christy/christie
+  if (s.includes('jessic') || s.includes('jesic') || s.includes('earvin') || s.includes('jay')) return 'JAY';
   if (s.includes('ling')) return 'LING';
   if (s.includes('dada') || s.includes('dāda') || s.includes('island') || s.includes('general')) return 'GENERAL';
   return null;

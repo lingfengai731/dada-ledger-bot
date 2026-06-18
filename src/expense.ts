@@ -62,6 +62,11 @@ export function mergeToDraft(
   if (isWedding && !note.weddingDate) warnings.push('Wedding expense but no wedding date detected.');
   if (cost === null) warnings.push('No amount detected on the receipt or in the note.');
   if (!vendorDescription) warnings.push('No vendor/description detected.');
+  // Amount sanity: a cost under 1.000 IDR is almost always a dropped thousands
+  // separator (e.g. "500" should be "500.000"). Flag it for a double-check.
+  if (cost != null && cost > 0 && cost < 1000) {
+    warnings.push(`Amount looks very low (${cost}) — a thousands separator may be missing (e.g. ${cost} vs ${cost}.000). Please double-check.`);
+  }
 
   return {
     vendorDescription,

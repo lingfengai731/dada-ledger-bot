@@ -1,6 +1,7 @@
 import type { ExpenseDraft } from '../expense.js';
 import { lookupSchedule, isKnownVenue, venueWeddings, entryPic } from './weddingSchedule.js';
 import { rememberWedding, inferFromContext } from './contextMemory.js';
+import { daysBetween } from '../util/dates.js';
 import { logger } from '../logger.js';
 
 /**
@@ -68,18 +69,36 @@ export function enrichDraft(draft: ExpenseDraft): string[] {
     if (venues.length) {
       const datesAtVenue = new Set(venues.map((e) => e.weddingDate));
       const target = venues[0];
+      // Confidence: a venue match is trustworthy when it's the venue's ONLY
+      // wedding, or the nearest one is within ~45 days of the purchase (flowers
+      // are bought close to the event). A far/ambiguous match must NOT silently
+      // overwrite or invent a date — leave it ??? for staff to confirm.
+      const ref = draft.invoiceDate ?? draft.weddingDate;
+      const gap = ref ? daysBetween(ref, target.weddingDate) : null;
+      const confident = venues.length === 1 || (gap != null && Math.abs(gap) <= 45);
+
       if (!draft.weddingDate) {
-        draft.weddingDate = target.weddingDate;
-        notes.push(`Wedding date set to ${target.weddingDate} from the schedule (${target.client || target.venue}).`);
+        if (confident) {
+          draft.weddingDate = target.weddingDate;
+          notes.push(`Wedding date set to ${target.weddingDate} from the schedule (${target.client || target.venue}).`);
+        } else {
+          notes.push(`Couldn't confidently pick which ${target.venue} wedding (nearest is ${target.weddingDate}) — please add the wedding date.`);
+        }
       } else if (!datesAtVenue.has(draft.weddingDate)) {
-        notes.push(
-          `Wedding date adjusted to ${target.weddingDate} from the schedule (${target.client || target.venue}) — ` +
-            `the note said ${draft.weddingDate}, but there's no wedding at ${target.venue} that day. Correct me if wrong.`,
-        );
-        draft.weddingDate = target.weddingDate;
+        if (confident) {
+          notes.push(
+            `Wedding date adjusted to ${target.weddingDate} from the schedule (${target.client || target.venue}) — ` +
+              `the note said ${draft.weddingDate}, but there's no wedding at ${target.venue} that day. Correct me if wrong.`,
+          );
+          draft.weddingDate = target.weddingDate;
+        } else {
+          notes.push(`Heads up: ${draft.weddingDate} isn't a ${target.venue} wedding date on the schedule — please double-check.`);
+        }
       }
       if (!draft.pic) {
-        const p = entryPic(target, draft.pic);
+        // Fill PIC when confident, or when every candidate shares the same PIC.
+        const distinctPics = [...new Set(venues.flatMap((e) => e.pics))];
+        const p = confident ? entryPic(target, draft.pic) : distinctPics.length === 1 ? distinctPics[0] : null;
         if (p) {
           draft.pic = p;
           notes.push(`PIC set to ${p} from the schedule (${target.client || target.venue}).`);
@@ -97,8 +116,9 @@ export function enrichDraft(draft: ExpenseDraft): string[] {
     const needDate = !draft.weddingDate;
     const needPic = !draft.pic;
 
-    if (needDate || needPic) {
-      // 2b) No venue match — fall back to exact-date / client lookup.
+    // 2b) Only when there was NO venue match (2a is authoritative for a known
+    // venue — don't let a generic date/client lookup overwrite its decision).
+    if (!venues.length && (needDate || needPic)) {
       const match = lookupSchedule({
         weddingDate: draft.weddingDate,
         venueText: draft.location,

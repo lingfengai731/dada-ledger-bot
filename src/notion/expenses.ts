@@ -20,8 +20,12 @@ const HANDLER_FALLBACK = [
   'RANIA', 'HIRA', 'JAY', 'PUTRI', 'MINGGU', 'PUTU', 'LING', 'KENT', 'CHRISTI', 'MADE',
   'JESICHA', 'HAMZAH', 'JESSICA',
 ];
-// Name aliases for the PIC column (boss: "jessica" is the same person as JAY).
-const PIC_ALIAS: Record<string, string> = { JESSICA: 'JAY', JESICHA: 'JAY' };
+// Name aliases for the PIC column. Boss: "jessica" is the same person as JAY.
+// Staff spell names loosely (christy/jesicca…), seen in the real chat export.
+const PIC_ALIAS: Record<string, string> = {
+  JESSICA: 'JAY', JESICHA: 'JAY', JESICCA: 'JAY', JESSICHA: 'JAY',
+  CHRISTY: 'CHRISTI', CHRISTIE: 'CHRISTI', ANDRIAN: 'CHRISTI',
+};
 
 const notion = config.notion.hasToken
   ? new Client({

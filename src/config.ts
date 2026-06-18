@@ -37,6 +37,9 @@ export const config = {
   triggerMode: (process.env.TRIGGER_MODE ?? 'auto') as 'auto' | 'keyword',
   /** Optional keyword accelerator; required only in 'keyword' mode. */
   triggerKeyword: process.env.TRIGGER_KEYWORD ?? 'exp',
+  /** Optional URL pinged every few minutes while WhatsApp is connected, so an
+   * external monitor (e.g. healthchecks.io) can alert if the bot goes silent. */
+  healthcheckUrl: process.env.HEALTHCHECK_URL ?? '',
   dryRun: bool(process.env.DRY_RUN, true),
   currency: process.env.CURRENCY ?? 'IDR',
   locale: process.env.LOCALE ?? 'id-ID',

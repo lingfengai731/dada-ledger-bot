@@ -79,8 +79,32 @@ export function createBot() {
     logger.info('Scan this QR with WhatsApp → Linked devices → Link a device:');
     qrcode.generate(qr, { small: true });
   });
-  client.on('auth_failure', (m) => logger.error({ m }, 'WhatsApp auth failure'));
-  client.on('disconnected', (r) => logger.warn({ r }, 'WhatsApp disconnected'));
+  client.on('auth_failure', (m) => logger.error({ m }, '🚨 WhatsApp auth failure — may need a re-scan'));
+  client.on('disconnected', (r) => logger.error({ r }, '🚨 WhatsApp disconnected — bot is NOT processing messages'));
+
+  // Heartbeat: every 5 min log the connection state, and (if HEALTHCHECK_URL is
+  // set) ping it while connected so an external monitor alerts if pings stop —
+  // this works even when WhatsApp/the server is down, which in-app alerts can't.
+  const heartbeat = setInterval(async () => {
+    let state = 'UNKNOWN';
+    try {
+      state = (await client.getState()) ?? 'UNKNOWN';
+    } catch {
+      state = 'UNREACHABLE';
+    }
+    if (state === 'CONNECTED') {
+      if (config.healthcheckUrl) {
+        try {
+          await fetch(config.healthcheckUrl);
+        } catch (err) {
+          logger.warn({ err }, 'healthcheck ping failed');
+        }
+      }
+    } else {
+      logger.error({ state }, '🚨 WhatsApp not connected');
+    }
+  }, 5 * 60 * 1000);
+  heartbeat.unref?.();
 
   client.on('ready', async () => {
     logger.info('WhatsApp client ready ✅');
@@ -312,6 +336,16 @@ async function finalize(
     if (i === 0) d.warnings.push(...extraWarnings);
     // Fill missing wedding date / PIC from the schedule + recent context.
     enrichDraft(d);
+    // Warn if this looks like an already-recorded receipt (same amount+date+item).
+    const dup = store.findDuplicateExpense({
+      cost: d.cost,
+      invoiceDate: d.invoiceDate,
+      vendorDescription: d.vendorDescription,
+    });
+    if (dup) {
+      const when = new Date(dup.created_at).toISOString().slice(0, 10);
+      d.warnings.push(`Possible duplicate — "${dup.vendor_description}" for the same amount & date was already saved on ${when}. Reply *ok* to save anyway.`);
+    }
     return d;
   });
   pendingDrafts.set(sender, { drafts, notes, receipt, imagePath, ts: Date.now(), waMessageId: msg.id._serialized });

@@ -206,6 +206,57 @@ export const store = {
     return Number(info.lastInsertRowid);
   },
 
+  /**
+   * Find a previously-saved expense that looks like a duplicate of this one
+   * (same amount + same invoice date + same description). Used to warn before
+   * double-recording a re-posted receipt.
+   */
+  findDuplicateExpense(e: {
+    cost: number | null;
+    invoiceDate: string | null;
+    vendorDescription: string | null;
+  }): { id: number; vendor_description: string; created_at: number } | null {
+    if (e.cost == null || !e.invoiceDate || !e.vendorDescription) return null;
+    const row = db
+      .prepare(
+        `SELECT id, vendor_description, created_at FROM expenses
+         WHERE cost = @cost AND invoice_date = @idate
+           AND LOWER(TRIM(vendor_description)) = LOWER(TRIM(@vendor))
+         ORDER BY id DESC LIMIT 1`,
+      )
+      .get({ cost: e.cost, idate: e.invoiceDate, vendor: e.vendorDescription });
+    return (row as any) ?? null;
+  },
+
+  /** Total recorded per handler (who paid) — a rough reimbursement view. */
+  owedByHandler(filters: { handler?: string; from?: string; to?: string }): {
+    handler: string;
+    total: number;
+    count: number;
+  }[] {
+    const where: string[] = ['handler IS NOT NULL', "TRIM(handler) <> ''"];
+    const params: Record<string, unknown> = {};
+    if (filters.handler) {
+      where.push('UPPER(handler) LIKE @h');
+      params.h = `%${filters.handler.toUpperCase()}%`;
+    }
+    if (filters.from) {
+      where.push('COALESCE(invoice_date, wedding_date) >= @from');
+      params.from = filters.from;
+    }
+    if (filters.to) {
+      where.push('COALESCE(invoice_date, wedding_date) <= @to');
+      params.to = filters.to;
+    }
+    return db
+      .prepare(
+        `SELECT handler, COALESCE(SUM(cost),0) AS total, COUNT(*) AS count
+         FROM expenses WHERE ${where.join(' AND ')}
+         GROUP BY UPPER(handler) ORDER BY total DESC`,
+      )
+      .all(params) as { handler: string; total: number; count: number }[];
+  },
+
   /** Sum/list expenses with optional filters. Dates filter on wedding_date. */
   sumExpenses(filters: { from?: string; to?: string; pic?: string; isWedding?: boolean }): {
     total: number;

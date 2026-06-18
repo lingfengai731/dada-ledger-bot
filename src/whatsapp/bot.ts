@@ -19,6 +19,7 @@ type WAMessage = pkg.Message;
 type WAChat = pkg.Chat;
 
 const SUPPORTED_IMAGE = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+const SUPPORTED_MEDIA = new Set([...SUPPORTED_IMAGE, 'application/pdf']);
 const DEBOUNCE_MS = 10 * 1000;
 const MERGE_WINDOW_MS = 5 * 60 * 1000;
 const CONFIRM_WORDS = new Set(['ok', 'okay', 'okk', 'yes', 'y', 'ya', 'yep', 'yeah', 'confirm', 'confirmed', 'oke', 'betul', 'save', 'sip', 'good']);
@@ -134,7 +135,7 @@ async function handleMessage(msg: WAMessage): Promise<void> {
   if (!(await isTargetGroup(msg))) return;
   const sender = msg.author ?? msg.from;
 
-  if (msg.hasMedia && msg.type === 'image') {
+  if (msg.hasMedia && (msg.type === 'image' || msg.type === 'document')) {
     await onImage(msg, sender);
     return;
   }
@@ -175,16 +176,16 @@ async function handleMessage(msg: WAMessage): Promise<void> {
 
 async function onImage(msg: WAMessage, sender: string): Promise<void> {
   const media = await msg.downloadMedia();
-  if (!media || !SUPPORTED_IMAGE.has(media.mimetype)) return;
+  if (!media || !SUPPORTED_MEDIA.has(media.mimetype)) return;
 
-  const ext = media.mimetype.split('/')[1] ?? 'jpg';
+  const ext = media.mimetype === 'application/pdf' ? 'pdf' : (media.mimetype.split('/')[1] ?? 'jpg');
   const imagePath = path.join(config.paths.imagesDir, `${msg.id._serialized.replace(/[^a-zA-Z0-9_-]/g, '_')}.${ext}`);
   fs.writeFileSync(imagePath, Buffer.from(media.data, 'base64'));
   const img: BufferedImage = { ts: Date.now(), mimetype: media.mimetype, data: media.data, imagePath };
 
   const pending = recentPending(sender);
   if (pending && pending.drafts.length === 1) {
-    await reply(msg, '🔎 Reading the receipt photo…');
+    await reply(msg, '🔎 Reading the receipt…');
     const receipt = await readReceipt(img);
     await finalize(msg, sender, pending.notes, receipt, imagePath, ['Updated with the photo.']);
     return;
@@ -275,10 +276,7 @@ const EMPTY_NOTE: WeddingNote = {
 };
 
 async function readReceipt(img: BufferedImage): Promise<Receipt | null> {
-  const receipts = await extractReceipts(
-    img.data,
-    img.mimetype as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif',
-  );
+  const receipts = await extractReceipts(img.data, img.mimetype);
   return receipts[0] ?? null;
 }
 

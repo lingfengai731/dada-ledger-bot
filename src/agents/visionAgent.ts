@@ -27,7 +27,7 @@ Return one object per distinct receipt.
 If something is illegible, set that field to null and explain in "notes". Never invent numbers.
 Give an honest "confidence" between 0 and 1 for each receipt.`;
 
-const INSTRUCTION = `Extract every receipt visible in this image.
+const INSTRUCTION = `Extract every receipt/invoice visible in this file (it may be a photo or a PDF invoice).
 
 Respond with ONLY a JSON object (no markdown, no commentary) of this exact shape:
 {
@@ -49,11 +49,16 @@ Respond with ONLY a JSON object (no markdown, no commentary) of this exact shape
 
 type RawReceipt = Partial<Receipt> & { items?: Partial<Receipt['items'][number]>[] };
 
-/** Read every receipt in one image. Returns [] if none could be parsed. */
+/** Read every receipt in one image OR PDF. Returns [] if none could be parsed. */
 export async function extractReceipts(
-  imageBase64: string,
-  mediaType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif',
+  base64: string,
+  mediaType: string,
 ): Promise<Receipt[]> {
+  const isPdf = mediaType === 'application/pdf';
+  const mediaBlock = isPdf
+    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
+    : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } };
+
   const response = await claude.messages.create({
     model: MODEL,
     max_tokens: 4096,
@@ -61,10 +66,7 @@ export async function extractReceipts(
     messages: [
       {
         role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
-          { type: 'text', text: INSTRUCTION },
-        ],
+        content: [mediaBlock as any, { type: 'text', text: INSTRUCTION }],
       },
     ],
   });

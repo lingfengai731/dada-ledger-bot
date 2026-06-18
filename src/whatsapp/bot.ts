@@ -40,6 +40,32 @@ interface Pending {
 
 const collecting = new Map<string, Collecting>();
 const pendingDrafts = new Map<string, Pending>();
+let waClient: pkg.Client | null = null;
+
+/** Normalized boss DM ids from BOSS_WHATSAPP_ID (comma-separated numbers or *@c.us). */
+function bossIds(): string[] {
+  return config.summary.bossWhatsappId
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => (s.includes('@') ? s : `${s.replace(/\D/g, '')}@c.us`));
+}
+
+/** DM the spend summary to each id. Returns how many sends succeeded. */
+async function pushSummaryTo(ids: string[], days: number): Promise<number> {
+  const text = buildPeriodSummary(days);
+  let ok = 0;
+  for (const id of ids) {
+    try {
+      if (!config.dryRun) await waClient?.sendMessage(id, text);
+      ok++;
+      logger.info({ id }, 'summary DM sent');
+    } catch (err) {
+      logger.error({ err, id }, 'summary DM failed');
+    }
+  }
+  return ok;
+}
 
 const INTRO_MESSAGE = [
   "👋 Hi everyone, I'm *DADA Ledger Bot* — your automated bookkeeping assistant.",
@@ -76,6 +102,7 @@ export function createBot() {
     authStrategy: new LocalAuth({ dataPath: config.paths.waAuthDir }),
     puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] },
   });
+  waClient = client;
 
   client.on('qr', (qr) => {
     logger.info('Scan this QR with WhatsApp → Linked devices → Link a device:');
@@ -112,20 +139,14 @@ export function createBot() {
   // Off unless BOSS_WHATSAPP_ID is set. Checked every 20 min; sent once per due day.
   let lastSummaryDate = '';
   const summaryTimer = setInterval(async () => {
-    const bossId = config.summary.bossWhatsappId;
-    if (!bossId) return;
+    const ids = bossIds();
+    if (!ids.length) return;
     const { date, hour, weekday, dayOfMonth } = baliParts();
     if (hour !== config.summary.hour) return;
     const due = config.summary.cadence === 'monthly' ? dayOfMonth === 1 : weekday === 1;
     if (!due || lastSummaryDate === date) return;
     lastSummaryDate = date;
-    try {
-      const text = buildPeriodSummary(config.summary.cadence === 'monthly' ? 30 : 7);
-      if (!config.dryRun) await client.sendMessage(bossId, text);
-      logger.info({ bossId, cadence: config.summary.cadence }, 'periodic summary sent to boss');
-    } catch (err) {
-      logger.error({ err }, 'failed to send periodic summary');
-    }
+    await pushSummaryTo(ids, config.summary.cadence === 'monthly' ? 30 : 7);
   }, 20 * 60 * 1000);
   summaryTimer.unref?.();
 
@@ -508,6 +529,12 @@ async function handleCommand(msg: WAMessage, body: string): Promise<void> {
   else if (cmd === 'ask' || cmd === 'q') await reply(msg, arg ? await answerQuestion(arg) : 'Usage: /ask <your question>');
   else if (cmd === 'summary') await reply(msg, buildPeriodSummary(arg === 'month' ? 30 : 7));
   else if (cmd === 'owed') await reply(msg, renderOwed(arg));
+  else if (cmd === 'pushsummary') {
+    const ids = bossIds();
+    if (!ids.length) { await reply(msg, 'No boss recipients configured (BOSS_WHATSAPP_ID).'); return; }
+    const ok = await pushSummaryTo(ids, arg === 'month' ? 30 : 7);
+    await reply(msg, `📤 Summary DM sent to ${ok}/${ids.length} recipient(s).`);
+  }
 }
 
 function renderOwed(handler: string): string {

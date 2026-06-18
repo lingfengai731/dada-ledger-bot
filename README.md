@@ -51,7 +51,8 @@
 4. **巴厘岛实时日期**:解析以 `Asia/Makassar`(UTC+8)的"今天"为准(`src/util/dates.ts` 的 `baliTodayISO()`)。
 
 ### 老板的强制规则(必须满足才允许保存)
-> 婚礼支出**必须**同时有 **婚礼日期** 和 **organiser(PIC)**。
+> 婚礼支出**必须**同时有 **婚礼日期** 和 **PIC(person in charge,婚礼负责人)**。
+> (老板定:用 date + PIC 作硬性要求,而不是 organiser——因为有些婚礼没有 organiser 或员工不知道。)
 
 - 补全后仍缺的,摘要里显示 `???`,且**回 `ok` 也拒绝保存**,提示员工补。
 - 员工随后补一句(如 `16/06 christi`)会**合并进原草稿**(不会冲掉已读到的收据),补全后即可 `ok`。
@@ -121,6 +122,7 @@ npm run dev        # 启动(改代码自动重启);首次会弹二维码,用 DAD
 npm run typecheck                                  # 类型检查
 npx tsx src/cli/eval-schedule.ts                   # 婚礼日程表补全 + 拦截规则(纯离线)
 npx tsx src/cli/eval-pipeline.ts "06/15 mitir 06/15 1.000.000 putu (komaneka)"  # 解析+补全全流程
+npx tsx src/cli/calibrate.ts "<_chat.txt>" 90 tail               # 在真实聊天记录上批量评估准确率/拦截率
 npx tsx src/cli/notion-schema.ts                   # 打印可访问的 Notion 数据源结构
 npx tsx src/cli/eval-notes.ts "<导出的 _chat.txt 路径>"   # 在真实聊天记录上跑解析器
 npm run ask -- "这个月花了多少?"                    # 命令行问答
@@ -170,7 +172,7 @@ ssh ... "cd /opt/dada-ledger-bot && \
 - [x] 确认后写入 Notion EXPENSES(invoice2026)+ 本地 SQLite
 - [x] 群内自然语言问答(`/ask` `/total`),入群双语自我介绍
 - [x] **婚礼日程表智能补全 + 场地优先 + 上下文记忆 + 巴厘岛时间**
-- [x] **强制规则:婚期/organiser 缺失显示 `???` 并拒绝保存**
+- [x] **强制规则:婚期/PIC 缺失显示 `???` 并拒绝保存**
 - [x] 部署新加坡 VPS,7×24 在线
 - [ ] 婚礼日程表**实时**读取(待老板把 WEDDING SCHEDULE 页面分享给集成)
 - [ ] (可选)只读网页仪表盘 / 原生 App

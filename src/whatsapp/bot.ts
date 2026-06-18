@@ -44,7 +44,7 @@ const INTRO_MESSAGE = [
   "📸 Just post the *receipt photo* with a short note (date, amount, who it's for) — the way you already do. I'll read it, show you a quick summary, and save it to the ledger once you reply *ok*. You can list several expenses in one message too.",
   '   e.g. _06/15 gosend kyea 06/16 115.500 putu (komaneka)_',
   '',
-  '💍 For weddings I always need a *wedding date* and an *organiser (PIC)*. If you leave them out I\'ll try to fill them from the schedule; if I still show *???*, just reply with them before you confirm.',
+  '💍 For weddings I always need a *wedding date* and a *PIC (person in charge)*. If you leave them out I\'ll try to fill them from the schedule; if I still show *???*, just reply with them before you confirm.',
   '',
   '🧾 You can also ask me: */total*, */ask <question>*, */help*.',
   '',
@@ -315,8 +315,8 @@ async function commit(msg: WAMessage, sender: string): Promise<void> {
   const pending = pendingDrafts.get(sender);
   if (!pending) return;
 
-  // Boss's rule: a wedding expense must have BOTH a wedding date and an organiser
-  // (PIC). If anything is still ???, refuse to save and ask the staff to fill it in.
+  // Boss's rule: a wedding expense must have BOTH a wedding date and a PIC
+  // (person in charge). If anything is still ???, refuse to save and ask for it.
   const blocked = pending.drafts
     .map((d, i) => ({ i, missing: missingRequired(d) }))
     .filter((x) => x.missing.length);
@@ -383,7 +383,7 @@ function renderSummary(drafts: ExpenseDraft[]): string {
 
   const stillMissing = drafts.some((d) => missingRequired(d).length);
   if (stillMissing) {
-    lines.push('', '🚫 Some expenses still show *???* — reply with the missing *wedding date* / *organiser* before I can save.');
+    lines.push('', '🚫 Some expenses still show *???* — reply with the missing *wedding date* / *PIC* before I can save.');
   } else {
     lines.push('', 'Reply *ok* to save all, *cancel* to discard.');
   }
@@ -397,13 +397,13 @@ function renderOne(draft: ExpenseDraft): string {
   // Invoice date (when the receipt was issued) is always shown.
   lines.push(`*Invoice date:* ${draft.invoiceDate ?? '—'}`);
   if (draft.isWedding) {
-    // Boss's rule: wedding date & organiser are always shown; ??? when missing.
+    // Boss's rule: a wedding always needs a wedding date + PIC; ??? when missing.
     lines.push(`*Wedding date:* ${displayWeddingDate(draft)}`);
-    lines.push(`*Organiser (PIC):* ${displayPic(draft)}`);
+    lines.push(`*PIC:* ${displayPic(draft)}`);
   } else {
     lines.push('*Type:* non-wedding');
   }
-  if (draft.handler) lines.push(`*Buyer (Handler):* ${draft.handler}`);
+  if (draft.handler) lines.push(`*Handler:* ${draft.handler}`);
   if (draft.info.length) lines.push('', 'ℹ️ ' + draft.info.join('\nℹ️ '));
   if (draft.warnings.length) lines.push('', '⚠️ ' + draft.warnings.join('\n⚠️ '));
 

@@ -11,7 +11,13 @@ import type { WeddingNote } from '../types.js';
 // PIC = current wedding leads (KENT/RANIA excluded per boss). STAFF = everyone who may pay.
 const PIC_OPTIONS = ['LING', 'JAY', 'CHRISTI', 'PUTRI', 'GENERAL'];
 const STAFF = [...PIC_OPTIONS, 'RANIA', 'MINGGU', 'PUTU', 'MADE', 'JESICHA', 'HAMZAH', 'JESSICA', 'ANTA WAYAN', 'IPUTU'];
-const VENUES = ['Pandawa', 'Komaneka', 'Komaneka Kramas', 'Samabe', 'The Seed', 'Lombok'];
+const VENUES = [
+  'Pandawa', 'Komaneka', 'Samabe', 'The Seed', 'Lombok', 'Ungasan', 'Alila Uluwatu',
+  'Soori', 'Villa Vedas', 'Khayangan', 'Glamp Nusa', 'Sky Ayana', 'Ayana',
+  'Four Seasons Jimbaran', 'W Seminyak', 'Conrad', 'Wonderland Uluwatu', 'Mandapa',
+  'Raffles', 'Maya', 'Six Senses', 'Tirtha', 'Ritz-Carlton', 'Stone Villa',
+  'Plenilunio', 'Jeeva Saba', 'Mulia', 'Noku', 'Bambu Indah', 'Umana', 'Potato Head',
+];
 
 function buildSystem(): string {
   return `You parse short WhatsApp notes from DADA Island staff (a wedding decor/florist
@@ -24,6 +30,10 @@ in 2026 unless a year is written. Money uses "." or "," as the THOUSANDS separat
 DATE FORMAT VARIES BY PERSON: some write month/day ("06/13"), others day/month ("13/06").
 Both mean 13 June. Use the value that yields a valid 2026 date; when ambiguous, prefer the
 near-future or recent date. Output ISO YYYY-MM-DD.
+- 4-DIGIT dates with no separator: "0620" = 20 June, "0611" = 11 June (MMDD or DDMM — pick the valid one).
+- MONTH NAMES appear in English and Indonesian: jan/januari, feb/februari, mar/maret, apr/april,
+  may/mei, jun/juni, jul/juli, aug/agustus, sep/september, oct/oktober, nov/november, dec/desember.
+  "9 JUNI 2026" = 2026-06-09, "1 may" = 2026-05-01.
 
 TWO DATES: many notes contain two dates in the pattern
    <invoice/purchase date>  <item>  <wedding/event date>  <amount>  <person> (<location>)
@@ -47,6 +57,15 @@ LOCATION & PIC:
 - "(Pandawa-jessica)" or "(Pandawa-Christy)" → location is before the dash, PIC is after it.
 - "for 22nd June Samabe" → wedding date + venue (Samabe).
 - "0620 ling's" → "ling's" implies PIC Ling.
+- VENUE OFTEN APPEARS IN FREE TEXT, not just in parentheses:
+  "15/04 Cream fabric for curtain drapes 19th conrad wedding" → location "Conrad", weddingDate the 19th.
+  "18/04 Red marker for 18th Glamp nusa wedding" → location "Glamp Nusa", weddingDate the 18th.
+  "ribbons for weddings (20 raffles, 29 lombok wedding)" → two events: 20th Raffles, 29th Lombok.
+  Treat a hotel/villa/resort/estate name (optionally followed by the word "wedding") as the location.
+- DAY-ONLY / ORDINAL wedding dates: "19th", "18th", "1 may", "29 lombok", "for the 20th".
+  Combine the day with the nearest month from context (often the same month as, or just after,
+  the invoice date). If you cannot tell the month confidently, output the day you DID read and set
+  a lower confidence; never invent a month silently.
 Known venues: ${VENUES.join(', ')}. Known staff: ${STAFF.join(', ')}.
 
 PIC vs BUYER (two different people):

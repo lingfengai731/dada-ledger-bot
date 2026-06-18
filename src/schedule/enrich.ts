@@ -7,7 +7,7 @@ import { logger } from '../logger.js';
  * Make a draft "smart": use the venue to decide it's a wedding, then fill in a
  * missing WEDDING DATE / PIC from the WEDDING SCHEDULE, falling back to recent
  * same-day/same-venue context from colleagues. Boss's rule: a wedding expense
- * MUST end up with both a wedding date and an organiser (PIC) — otherwise the
+ * MUST end up with both a wedding date and a PIC (person in charge) — otherwise the
  * summary shows ??? and submission is blocked until staff fill them in.
  */
 
@@ -18,7 +18,7 @@ export function missingRequired(draft: ExpenseDraft): string[] {
   if (!draft.isWedding) return [];
   const missing: string[] = [];
   if (!draft.weddingDate) missing.push('wedding date');
-  if (!draft.pic) missing.push('organiser (PIC)');
+  if (!draft.pic) missing.push('PIC');
   return missing;
 }
 

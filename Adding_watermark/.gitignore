@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+uploads/
+outputs/
+registry.db
+_test_*
+_sample*
+_demo*
+_d.jpg
+_s.jpg
+_repost*.jpg
+*.tmp.png
+.venv/

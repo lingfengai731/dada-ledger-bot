@@ -2,6 +2,8 @@
 
 不动 dada-island.com / Squarespace。用免费的 DuckDNS 给一个指向我们 VPS 的子域名,配正规 HTTPS,再作为 Notion embed 嵌进工作区。
 
+> ⚠️ **域名信誉(实测发现)**:`*.duckdns.org` 这类免费动态域名会被部分手机浏览器的安全库**误标为"有风险"**(安卓上可能直接打不开)。桌面 + iOS 一般正常。**生产环境建议改用正规子域名 `watermark.dada-island.com`**:在 dada-island.com 的 DNS 里加一条记录即可(类型 A、主机 `watermark`、值 `207.148.68.180`),不改动网站本身;加好后我重跑 `certbot -d watermark.dada-island.com` 换证书即可。下面的 DuckDNS 步骤作为零成本的起步/备用方案。
+
 ## 第 1 步:DuckDNS(你做,约 1 分钟)
 
 1. 打开 https://www.duckdns.org,用 Google / GitHub 登录(免费)。

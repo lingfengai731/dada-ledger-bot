@@ -12,11 +12,21 @@ from __future__ import annotations
 import os
 import sqlite3
 import datetime
+import hashlib
 
-from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi import FastAPI, UploadFile, File, Form, Request
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 
 import watermark as wm
+
+# Optional shared password. Set WATERMARK_PASSWORD in the environment to require
+# a login before anyone can use the tool (recommended once it's public). Empty
+# = open (fine for local use).
+PASSWORD = os.environ.get("WATERMARK_PASSWORD", "")
+
+
+def _auth_token() -> str:
+    return hashlib.sha256(f"dada-wm::{PASSWORD}".encode()).hexdigest()[:32]
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 UP = os.path.join(BASE, "uploads")
@@ -34,6 +44,14 @@ db.execute(
 db.commit()
 
 app = FastAPI(title="DADA Watermark")
+
+
+@app.middleware("http")
+async def require_login(request: Request, call_next):
+    if PASSWORD and request.url.path not in ("/login", "/logo"):
+        if request.cookies.get("wm_auth") != _auth_token():
+            return RedirectResponse("/login", status_code=302)
+    return await call_next(request)
 
 STYLE = """
 *{box-sizing:border-box}
@@ -80,6 +98,27 @@ def page(body: str, active: str = "") -> str:
 @app.get("/logo")
 def logo():
     return FileResponse(os.path.join(BASE, "logo-white.png"), media_type="image/png")
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(bad: int = 0) -> str:
+    err = '<p class="bad">Wrong password.</p>' if bad else ""
+    return page(
+        f"""<h1>Enter password</h1>{err}
+        <div class="card"><form action="/login" method="post">
+          <label>Password</label><input type="text" name="password" autofocus>
+          <button type="submit">Enter</button>
+        </form></div>"""
+    )
+
+
+@app.post("/login")
+def login(password: str = Form("")):
+    if PASSWORD and password == PASSWORD:
+        resp = RedirectResponse("/", status_code=302)
+        resp.set_cookie("wm_auth", _auth_token(), max_age=60 * 60 * 24 * 30, httponly=True, samesite="lax")
+        return resp
+    return RedirectResponse("/login?bad=1", status_code=302)
 
 
 @app.get("/", response_class=HTMLResponse)

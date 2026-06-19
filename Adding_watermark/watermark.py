@@ -21,10 +21,12 @@ from functools import lru_cache
 from PIL import Image, ImageDraw, ImageFont
 from blind_watermark import WaterMark
 
-# Secret seeds — change these once for production and keep them private; the
-# same values are needed to extract. (Anyone with these can read/forge marks.)
-PASSWORD_IMG = 20260619
-PASSWORD_WM = 731
+# Secret seeds for the invisible watermark. The SAME values are needed to
+# extract, so keep them private and stable. In production they're set via env
+# (WM_PASSWORD_IMG / WM_PASSWORD_WM) so the real keys never live in git; the
+# defaults below are only for local dev.
+PASSWORD_IMG = int(os.environ.get("WM_PASSWORD_IMG", "20260619"))
+PASSWORD_WM = int(os.environ.get("WM_PASSWORD_WM", "731"))
 
 CODE_LEN = 20  # exact number of ASCII characters embedded
 

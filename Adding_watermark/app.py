@@ -116,7 +116,8 @@ def login_page(bad: int = 0) -> str:
 def login(password: str = Form("")):
     if PASSWORD and password == PASSWORD:
         resp = RedirectResponse("/", status_code=302)
-        resp.set_cookie("wm_auth", _auth_token(), max_age=60 * 60 * 24 * 30, httponly=True, samesite="lax")
+        # SameSite=None; Secure so the cookie works inside the Notion iframe (HTTPS).
+        resp.set_cookie("wm_auth", _auth_token(), max_age=60 * 60 * 24 * 30, httponly=True, samesite="none", secure=True)
         return resp
     return RedirectResponse("/login?bad=1", status_code=302)
 

@@ -1,4 +1,23 @@
-# 上线到子域名(免费 DuckDNS + HTTPS + Notion 嵌入)
+# 上线 + Notion 嵌入
+
+## 方案 R:Render(推荐 ✅ 正规域名、免 DNS、免维护)
+
+仓库根目录有 `render.yaml`(Blueprint),把本 app(子目录 `Adding_watermark`)一键部署成 `https://watermark-dada-island.onrender.com`,域名信誉好、手机不拦。
+
+1. 打开 https://render.com,用 **GitHub 登录**,授权访问 `dada-ledger-bot` 私有仓库。
+2. **New → Blueprint** → 选这个仓库 → 它读到 `render.yaml`。
+3. 提示填 3 个环境变量(都是密钥):
+   - `WATERMARK_PASSWORD` = 登录口令(如 `Dada-Island-2026`)
+   - `WM_PASSWORD_IMG` = 一个整数(如 `814627395`)— 隐形水印密钥,保密
+   - `WM_PASSWORD_WM` = 另一个整数(如 `6093187`)— 同上
+4. Deploy。几分钟后给出 `https://watermark-dada-island.onrender.com`。
+5. Notion 里 `/embed` 粘这个网址即可。
+
+> 免费档说明:闲置约 15 分钟会休眠,下次打开冷启动约 50 秒;且**无持久磁盘** → 重启后"登记表"会清空(仍能验证"是不是我们的",只是丢失"哪场婚礼"的标签)。要常驻 + 登记表持久,升级到付费档($7/月)并挂 1GB 磁盘、设 `DATA_DIR=/var/data` 即可。
+
+---
+
+## 方案 V:自有 VPS + 子域名(已部署过,持久 / 常驻)
 
 不动 dada-island.com / Squarespace。用免费的 DuckDNS 给一个指向我们 VPS 的子域名,配正规 HTTPS,再作为 Notion embed 嵌进工作区。
 

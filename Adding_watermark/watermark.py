@@ -79,14 +79,27 @@ def _add_text(img: "Image.Image", text: str) -> "Image.Image":
     return Image.alpha_composite(img, overlay)
 
 
+def _xy(w: int, h: int, lw: int, lh: int, position: str):
+    mx, my = w // 28, h // 28
+    pos = {
+        "br": (w - lw - mx, h - lh - my),
+        "bl": (mx, h - lh - my),
+        "tr": (w - lw - mx, my),
+        "tl": (mx, my),
+        "center": ((w - lw) // 2, (h - lh) // 2),
+    }
+    return pos.get(position, pos["br"])
+
+
 def add_visible(
     in_path: str,
     out_path: str,
     opacity: float = 0.55,
     scale: float = 0.20,
+    position: str = "br",
     text: str = "DĀDA ISLAND",
 ) -> None:
-    """Overlay the white DADA logo in the bottom-right corner (text fallback)."""
+    """Overlay the white DADA logo (position / opacity / scale configurable)."""
     img = Image.open(in_path).convert("RGBA")
     w, h = img.size
     if os.path.exists(LOGO_WHITE):
@@ -96,8 +109,7 @@ def add_visible(
         logo = logo.resize((lw, lh), Image.LANCZOS)
         alpha = logo.split()[3].point(lambda a: int(a * opacity))
         logo.putalpha(alpha)
-        x, y = w - lw - w // 28, h - lh - h // 28
-        img.alpha_composite(logo, (x, y))
+        img.alpha_composite(logo, _xy(w, h, lw, lh, position))
         out = img
     else:
         out = _add_text(img, text)
@@ -121,13 +133,16 @@ def watermark_image(
     out_path: str,
     code: str,
     visible: bool = True,
+    opacity: float = 0.55,
+    scale: float = 0.20,
+    position: str = "br",
     visible_text: str = "DĀDA ISLAND",
 ) -> None:
     """Apply visible mark (optional) then embed the invisible code into the result."""
     tmp = out_path + ".tmp.png"
     src = in_path
     if visible:
-        add_visible(in_path, tmp, text=visible_text)
+        add_visible(in_path, tmp, opacity=opacity, scale=scale, position=position, text=visible_text)
         src = tmp
     try:
         embed_invisible(src, out_path, code)

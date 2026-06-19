@@ -1,0 +1,18 @@
+# Render Blueprint for the DADA Watermark web app (subfolder Adding_watermark).
+# In Render: New → Blueprint → connect this repo → it reads this file.
+# Set the three env vars when prompted (they're marked sync:false = secret).
+services:
+  - type: web
+    name: watermark-dada-island
+    runtime: python
+    rootDir: Adding_watermark
+    plan: free
+    buildCommand: "pip install -r requirements.txt && (pip uninstall -y opencv-python opencv-contrib-python || true) && pip install opencv-python-headless"
+    startCommand: "uvicorn app:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: WATERMARK_PASSWORD
+        sync: false
+      - key: WM_PASSWORD_IMG
+        sync: false
+      - key: WM_PASSWORD_WM
+        sync: false

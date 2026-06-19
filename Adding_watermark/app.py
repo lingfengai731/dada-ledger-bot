@@ -157,6 +157,15 @@ async def embed(
         (code, shoot, note, file.filename, datetime.datetime.now().isoformat(timespec="seconds")),
     )
     db.commit()
+    # Post/Redirect/Get: redirect to a GET result page so refresh/back doesn't
+    # re-POST (which would 405), and so it behaves on mobile Safari.
+    return RedirectResponse(f"/result/{code}", status_code=303)
+
+
+@app.get("/result/{code}", response_class=HTMLResponse)
+def result(code: str) -> str:
+    if not os.path.exists(os.path.join(OUT, f"{code}.jpg")):
+        return page('<h1>Not found</h1><a class="back" href="/">← back</a>', "add")
     return page(
         f"""<h1>Done</h1>
         <p>Hidden code embedded: <span class="code">{code}</span></p>

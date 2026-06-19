@@ -8,7 +8,7 @@ import { store } from '../db/store.js';
 import { extractReceipts } from '../agents/visionAgent.js';
 import { parseEmployeeNotes, parseEmployeeNote } from '../agents/messageParser.js';
 import { mergeToDraft, type ExpenseDraft } from '../expense.js';
-import { writeExpense } from '../notion/expenses.js';
+import { writeExpense, archiveExpense } from '../notion/expenses.js';
 import { answerQuestion } from '../agents/queryAgent.js';
 import { enrichDraft, missingRequired, displayWeddingDate, displayPic } from '../schedule/enrich.js';
 import { buildPeriodSummary } from '../agents/report.js';
@@ -78,7 +78,7 @@ const INTRO_MESSAGE = [
   '',
   "For weddings I really do need the *wedding date* and the *PIC* — if you skip them I'll try to find them from the schedule, but if you still see *???*, just tell me and then reply *ok*.",
   '',
-  "I'm a bot, so I only jump in when there's a receipt. Chat away, I won't get in the way. Need something? */total*, */ask*, */help*.",
+  "I'm a bot, so I only jump in when there's a receipt. Chat away, I won't get in the way. Saved one by mistake? Reply */undo*. Other things: */total*, */ask*, */help*.",
   '',
   '— — — — —',
   '',
@@ -92,7 +92,7 @@ const INTRO_MESSAGE = [
   '',
   'Untuk wedding saya butuh *tanggal wedding* dan *PIC* — kalau lupa saya coba cari dari schedule, tapi kalau masih *???*, kasih tahu saya lalu balas *ok*.',
   '',
-  'Saya cuma bot, jadi saya muncul kalau ada nota aja. Santai ngobrol, nggak bakal saya ganggu. Butuh sesuatu? */total*, */ask*, */help*.',
+  'Saya cuma bot, jadi saya muncul kalau ada nota aja. Santai ngobrol, nggak bakal saya ganggu. Salah simpan? Balas */undo*. Lainnya: */total*, */ask*, */help*.',
 ].join('\n');
 
 export function createBot() {
@@ -107,6 +107,12 @@ export function createBot() {
   client.on('qr', (qr) => {
     logger.info('Scan this QR with WhatsApp → Linked devices → Link a device:');
     qrcode.generate(qr, { small: true });
+    // Also persist the raw QR so it can be rendered/scanned off-server when re-linking.
+    try {
+      fs.writeFileSync(path.join(config.paths.dataDir, 'last-qr.txt'), qr);
+    } catch (err) {
+      logger.warn({ err }, 'could not write last-qr.txt');
+    }
   });
   client.on('auth_failure', (m) => logger.error({ m }, '🚨 WhatsApp auth failure — may need a re-scan'));
   client.on('disconnected', (r) => logger.error({ r }, '🚨 WhatsApp disconnected — bot is NOT processing messages'));
@@ -544,12 +550,28 @@ async function handleCommand(msg: WAMessage, body: string): Promise<void> {
   else if (cmd === 'ask' || cmd === 'q') await reply(msg, arg ? await answerQuestion(arg) : 'Usage: /ask <your question>');
   else if (cmd === 'summary') await reply(msg, buildPeriodSummary(arg === 'month' ? 30 : 7));
   else if (cmd === 'owed') await reply(msg, renderOwed(arg));
+  else if (cmd === 'undo') await handleUndo(msg, msg.author ?? msg.from);
   else if (cmd === 'pushsummary') {
     const ids = bossIds();
     if (!ids.length) { await reply(msg, 'No boss recipients configured (BOSS_WHATSAPP_ID).'); return; }
     const ok = await pushSummaryTo(ids, arg === 'month' ? 30 : 7);
     await reply(msg, `📤 Summary DM sent to ${ok}/${ids.length} recipient(s).`);
   }
+}
+
+async function handleUndo(msg: WAMessage, sender: string): Promise<void> {
+  const last = store.getLastExpense(sender);
+  if (!last) {
+    await reply(msg, "Nothing to undo — you haven't saved any expenses yet.");
+    return;
+  }
+  let note = '';
+  if (last.notion_page_id) {
+    const ok = await archiveExpense(last.notion_page_id);
+    note = ok ? ' (archived in Notion)' : " (couldn't archive the Notion row — please remove it there manually)";
+  }
+  store.removeExpense(last.id);
+  await reply(msg, `↩️ Removed your last entry: *${last.vendor_description ?? '—'}* ${formatMoney(last.cost)} ${config.currency}${note}.`);
 }
 
 function renderOwed(handler: string): string {

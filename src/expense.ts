@@ -67,6 +67,11 @@ export function mergeToDraft(
   if (cost != null && cost > 0 && cost < 1000) {
     warnings.push(`Amount looks very low (${cost}) — a thousands separator may be missing (e.g. ${cost} vs ${cost}.000). Please double-check.`);
   }
+  // Blurry photo: the receipt was read but the model wasn't confident. Ask for a
+  // clearer photo rather than trusting a shaky read.
+  if (receipt && typeof receipt.confidence === 'number' && receipt.confidence < 0.55) {
+    warnings.push('The photo was hard to read clearly — please check the amount, or resend a sharper photo.');
+  }
 
   return {
     vendorDescription,

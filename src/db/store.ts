@@ -257,6 +257,28 @@ export const store = {
       .all(params) as { handler: string; total: number; count: number }[];
   },
 
+  /** The most recent expense this submitter saved (for /undo). */
+  getLastExpense(submitter: string): {
+    id: number;
+    vendor_description: string | null;
+    cost: number | null;
+    notion_page_id: string | null;
+    created_at: number;
+  } | null {
+    const row = db
+      .prepare(
+        `SELECT id, vendor_description, cost, notion_page_id, created_at
+         FROM expenses WHERE submitter = ? ORDER BY id DESC LIMIT 1`,
+      )
+      .get(submitter);
+    return (row as any) ?? null;
+  },
+
+  /** Delete a stored expense row (after its Notion page is archived). */
+  removeExpense(id: number): void {
+    db.prepare('DELETE FROM expenses WHERE id = ?').run(id);
+  },
+
   /** Total recorded per PIC over a period (by invoice/wedding date). */
   sumByPic(filters: { from?: string; to?: string }): { pic: string; total: number; count: number }[] {
     const where: string[] = ['pic IS NOT NULL', "TRIM(pic) <> ''"];

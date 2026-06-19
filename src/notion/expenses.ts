@@ -115,6 +115,19 @@ function buildProperties(
   return { properties, unmapped };
 }
 
+/** Archive (soft-delete) a previously created Notion row — used by /undo. */
+export async function archiveExpense(pageId: string): Promise<boolean> {
+  if (!notion) return false;
+  try {
+    await notion.pages.update({ page_id: pageId, archived: true } as any);
+    logger.info({ pageId }, 'Notion expense row archived');
+    return true;
+  } catch (err) {
+    logger.error({ err, pageId }, 'Notion archive failed');
+    return false;
+  }
+}
+
 /** Create (or preview) a Notion EXPENSES row from a confirmed draft. */
 export async function writeExpense(draft: ExpenseDraft): Promise<NotionResult> {
   const opts = await getOptions();

@@ -32,7 +32,9 @@
  writeExpense     写入 Notion EXPENSES + 本地 SQLite        src/notion/expenses.ts
 ```
 
-群内问答:`/ask <问题>`、`/total`、`/help` → `src/agents/queryAgent.ts`
+群内命令:`/ask <问题>`、`/total`、`/summary [month]`、`/owed [名字]`、`/undo`(撤销自己上一笔,并归档对应 Notion 行)、`/help`。
+
+确认前的两道防呆:**金额异常**(< 1.000 IDR 疑似漏千分位)和**图太糊**(识别置信度低时提示重拍),都会在摘要里 ⚠️ 提醒。
 
 ---
 
@@ -174,8 +176,11 @@ ssh ... "cd /opt/dada-ledger-bot && \
 - [x] **婚礼日程表智能补全 + 场地优先 + 上下文记忆 + 巴厘岛时间**
 - [x] **强制规则:婚期/PIC 缺失显示 `???` 并拒绝保存**
 - [x] 部署新加坡 VPS,7×24 在线
-- [ ] 婚礼日程表**实时**读取(待老板把 WEDDING SCHEDULE 页面分享给集成)
+- [x] 婚礼日程表**实时**读取(Notion 已分享给集成)
+- [x] PDF 发票识别;PIC/HANDLER 选项实时同步;重复/金额异常/糊图防呆;`/undo` 撤销
+- [x] 每日备份 + 掉线监控(healthchecks.io)+ 每周自动汇总私发老板
 - [ ] (可选)只读网页仪表盘 / 原生 App
+- [ ] (评估中)迁移到官方 WhatsApp Business Cloud API(规避非官方自动化被限制/封号的风险)
 
 ---
 

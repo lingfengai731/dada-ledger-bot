@@ -22,9 +22,12 @@ type WAChat = pkg.Chat;
 
 const SUPPORTED_IMAGE = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const SUPPORTED_MEDIA = new Set([...SUPPORTED_IMAGE, 'application/pdf']);
-// How long to wait for related messages (a photo + its note, or a transfer
-// screenshot + "Reimbursement <name>") before processing them together.
+// Adaptive collect window. When we're still missing half of an expense (only a
+// photo, or only a note), wait longer for the other half to arrive. When the
+// message already has BOTH a photo and a note, it's self-contained — process
+// almost immediately.
 const DEBOUNCE_MS = 20 * 1000;
+const QUICK_MS = 3 * 1000;
 const MERGE_WINDOW_MS = 5 * 60 * 1000;
 const CONFIRM_WORDS = new Set(['ok', 'okay', 'okk', 'yes', 'y', 'ya', 'yep', 'yeah', 'confirm', 'confirmed', 'oke', 'betul', 'save', 'sip', 'good']);
 const CANCEL_WORDS = new Set(['cancel', 'no', 'nope', 'batal', 'skip']);
@@ -443,12 +446,16 @@ function schedule(sender: string): void {
   const c = collecting.get(sender);
   if (!c) return;
   if (c.timer) clearTimeout(c.timer);
+  // Both a photo and a note already? Self-contained → respond fast. Otherwise
+  // keep waiting for the missing half.
+  const complete = Boolean(c.image) && Boolean(c.noteText && c.noteText.trim());
+  const delay = complete ? QUICK_MS : DEBOUNCE_MS;
   c.timer = setTimeout(() => {
     collecting.delete(sender);
     buildFromCollection(c.firstMsg, sender, c.noteText ?? '', c.image ?? null).catch((err) =>
       logger.error({ err }, 'build failed'),
     );
-  }, DEBOUNCE_MS);
+  }, delay);
 }
 
 const EMPTY_NOTE: WeddingNote = {

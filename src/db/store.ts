@@ -300,6 +300,20 @@ export const store = {
     db.prepare('DELETE FROM expenses WHERE id = ?').run(id);
   },
 
+  /** Expenses the bot SAVED since an epoch-ms instant (for the nightly digest). */
+  expensesCreatedSince(sinceMs: number): {
+    id: number; vendor_description: string | null; wedding_date: string | null;
+    invoice_date: string | null; cost: number | null; pic: string | null;
+    handler: string | null; is_wedding: number; created_at: number;
+  }[] {
+    return db
+      .prepare(
+        `SELECT id, vendor_description, wedding_date, invoice_date, cost, pic, handler, is_wedding, created_at
+         FROM expenses WHERE created_at >= ? ORDER BY created_at ASC`,
+      )
+      .all(sinceMs) as any[];
+  },
+
   /** Total recorded per PIC over a period (by invoice/wedding date). */
   sumByPic(filters: { from?: string; to?: string }): { pic: string; total: number; count: number }[] {
     const where: string[] = ['pic IS NOT NULL', "TRIM(pic) <> ''"];
@@ -402,6 +416,12 @@ export const store = {
 
   markPendingReminded(sender: string): void {
     db.prepare('UPDATE pending_drafts SET reminded = 1 WHERE sender = ?').run(sender);
+  },
+
+  /** Update only the stored payload (e.g. to record a 30-min nudge) without
+   *  touching updated_at or the reminded flag, so the grace clocks keep running. */
+  updatePendingPayload(sender: string, payloadJson: string): void {
+    db.prepare('UPDATE pending_drafts SET payload_json = ? WHERE sender = ?').run(payloadJson, sender);
   },
 
   /** All open drafts (used to restore the in-memory map on startup). */

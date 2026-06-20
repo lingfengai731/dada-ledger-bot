@@ -11,7 +11,7 @@ import { mergeToDraft, recomputeVendorDescription, matchPerson, type ExpenseDraf
 import { writeExpense, archiveExpense } from '../notion/expenses.js';
 import { answerQuestion } from '../agents/queryAgent.js';
 import { enrichDraft, missingRequired, displayWeddingDate, displayPic } from '../schedule/enrich.js';
-import { buildPeriodSummary } from '../agents/report.js';
+import { buildPeriodSummary, buildDailyDigest } from '../agents/report.js';
 import { formatMoney } from '../util/money.js';
 import { baliParts, baliNowText } from '../util/dates.js';
 import type { Receipt, WeddingNote } from '../types.js';
@@ -38,12 +38,16 @@ interface Pending {
   waMessageId: string;
   /** The chat (group) to post the auto-save / reminder back to. */
   chatId: string;
+  /** true once the 30-min "please confirm" nudge has been sent (don't repeat). */
+  nudged30?: boolean;
 }
 
 // A draft nobody replied "ok" to is auto-saved after this long (boss's rule:
 // don't lose expenses just because staff forgot to confirm). The clock runs from
 // the last time the draft was shown or corrected.
 const AUTO_WRITE_MS = 8 * 60 * 60 * 1000;
+// After this long unconfirmed, @-nudge the staff who posted it (once).
+const NUDGE_MS = 30 * 60 * 1000;
 const SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 
 const collecting = new Map<string, Collecting>();
@@ -103,9 +107,8 @@ function bossIds(): string[] {
     .map((s) => (s.includes('@') ? s : `${s.replace(/\D/g, '')}@c.us`));
 }
 
-/** DM the spend summary to each id. Returns how many sends succeeded. */
-async function pushSummaryTo(ids: string[], days: number): Promise<number> {
-  const text = buildPeriodSummary(days);
+/** DM the given text to each id. Returns how many sends succeeded. */
+async function pushSummaryTo(ids: string[], text: string): Promise<number> {
   let ok = 0;
   for (const id of ids) {
     try {
@@ -217,10 +220,16 @@ export function createBot() {
     if (!ids.length) return;
     const { date, hour, weekday, dayOfMonth } = baliParts();
     if (hour !== config.summary.hour) return;
-    const due = config.summary.cadence === 'monthly' ? dayOfMonth === 1 : weekday === 1;
+    const due =
+      config.summary.cadence === 'daily' ? true :
+      config.summary.cadence === 'monthly' ? dayOfMonth === 1 : weekday === 1;
     if (!due || lastSummaryDate === date) return;
     lastSummaryDate = date;
-    await pushSummaryTo(ids, config.summary.cadence === 'monthly' ? 30 : 7);
+    const text =
+      config.summary.cadence === 'daily'
+        ? buildDailyDigest()
+        : buildPeriodSummary(config.summary.cadence === 'monthly' ? 30 : 7);
+    await pushSummaryTo(ids, text);
   }, 20 * 60 * 1000);
   summaryTimer.unref?.();
 
@@ -588,8 +597,8 @@ async function savePending(pending: Pending, sender: string): Promise<{ savedToN
  * still missing required fields can't be saved — we nudge once and leave it.
  */
 async function sweepPending(): Promise<void> {
-  const cutoff = Date.now() - AUTO_WRITE_MS;
-  for (const row of store.pendingOlderThan(cutoff)) {
+  const now = Date.now();
+  for (const row of store.pendingOlderThan(now - NUDGE_MS)) {
     let pending: Pending;
     try {
       pending = JSON.parse(row.payload_json) as Pending;
@@ -597,41 +606,65 @@ async function sweepPending(): Promise<void> {
       store.deletePending(row.sender);
       continue;
     }
+    const age = now - row.updated_at;
 
-    const stillMissing = pending.drafts.some((d) => missingRequired(d).length);
-    if (stillMissing) {
-      if (!row.reminded) {
-        const text =
-          '⏰ Reminder: a receipt is still waiting on its *wedding date* / *PIC* before I can save it. ' +
-          'Please reply with the missing detail, then *ok*.';
-        try {
-          if (!config.dryRun) await waClient?.sendMessage(row.chat_id, text);
-          else logger.info('\n[auto-reminder preview]\n' + text);
-        } catch (err) {
-          logger.error({ err }, 'auto-reminder send failed');
+    // ── 8h: auto-save complete drafts; nudge blocked ones once. ──
+    if (age >= AUTO_WRITE_MS) {
+      const stillMissing = pending.drafts.some((d) => missingRequired(d).length);
+      if (stillMissing) {
+        if (!row.reminded) {
+          const text =
+            '⏰ Reminder: a receipt is still waiting on its *wedding date* / *PIC* before I can save it. ' +
+            'Please reply with the missing detail, then *ok*.';
+          await sendToChat(row.chat_id, text, '[auto-reminder preview]');
+          store.markPendingReminded(row.sender);
         }
-        store.markPendingReminded(row.sender);
+        continue;
       }
+      clearPending(row.sender);
+      const { savedToNotion, total, count } = await savePending(pending, row.sender);
+      const items = pending.drafts
+        .map((d) => `• ${d.vendorDescription ?? '???'} — ${formatMoney(d.cost)}`)
+        .join('\n');
+      const where = savedToNotion > 0 ? 'to Notion' : '(preview mode — not written to Notion)';
+      await sendToChat(
+        row.chat_id,
+        `⏱️ Auto-saved ${count} expense${count > 1 ? 's' : ''} ${where} after 8h with no *ok* reply:\n` +
+          `${items}\n*Total ${formatMoney(total)} ${config.currency}.*\nReply */undo* if any of these is wrong.`,
+        '[auto-save preview]',
+      );
+      logger.info({ sender: row.sender, count, savedToNotion }, 'auto-saved pending drafts after grace period');
       continue;
     }
 
-    clearPending(row.sender);
-    const { savedToNotion, total, count } = await savePending(pending, row.sender);
-    const items = pending.drafts
-      .map((d) => `• ${d.vendorDescription ?? '???'} — ${formatMoney(d.cost)}`)
-      .join('\n');
-    const where = savedToNotion > 0 ? 'to Notion' : '(preview mode — not written to Notion)';
-    const text =
-      `⏱️ Auto-saved ${count} expense${count > 1 ? 's' : ''} ${where} after 8h with no *ok* reply:\n` +
-      `${items}\n*Total ${formatMoney(total)} ${config.currency}.*\nReply */undo* if any of these is wrong.`;
-    try {
-      if (!config.dryRun) await waClient?.sendMessage(row.chat_id, text);
-      else logger.info('\n[auto-save preview]\n' + text);
-    } catch (err) {
-      logger.error({ err }, 'auto-save announce failed');
+    // ── 30 min: @-nudge the staff who posted it, once. ──
+    if (!pending.nudged30) {
+      await sendNudge(row.sender, row.chat_id, pending);
+      pending.nudged30 = true;
+      store.updatePendingPayload(row.sender, JSON.stringify(pending));
     }
-    logger.info({ sender: row.sender, count, savedToNotion }, 'auto-saved pending drafts after grace period');
   }
+}
+
+/** Send to a chat (respecting dry-run), logging a preview when dry. */
+async function sendToChat(chatId: string, text: string, previewLabel: string, opts?: object): Promise<void> {
+  try {
+    if (!config.dryRun) await waClient?.sendMessage(chatId, text, opts as any);
+    else logger.info(`\n${previewLabel}\n` + text);
+  } catch (err) {
+    logger.error({ err, chatId }, 'sendToChat failed');
+  }
+}
+
+/** Remind the staff member who posted an unconfirmed expense, @-mentioning them. */
+async function sendNudge(sender: string, chatId: string, pending: Pending): Promise<void> {
+  const number = sender.split('@')[0];
+  const what = pending.drafts[0]?.vendorDescription ?? 'this expense';
+  const missing = [...new Set(pending.drafts.flatMap((d) => missingRequired(d)))];
+  const text = missing.length
+    ? `⏰ @${number} I still need the *${missing.join('* & *')}* for *${what}* before I can save it. Reply with it, then *ok*.`
+    : `⏰ @${number} please confirm *${what}* — reply *ok* to save, or send a correction.`;
+  await sendToChat(chatId, text, '[nudge preview]', { mentions: [sender] });
 }
 
 function renderSummary(drafts: ExpenseDraft[]): string {
@@ -728,7 +761,8 @@ async function handleCommand(msg: WAMessage, body: string): Promise<void> {
   else if (cmd === 'pushsummary') {
     const ids = bossIds();
     if (!ids.length) { await reply(msg, 'No boss recipients configured (BOSS_WHATSAPP_ID).'); return; }
-    const ok = await pushSummaryTo(ids, arg === 'month' ? 30 : 7);
+    const text = arg === 'today' ? buildDailyDigest() : buildPeriodSummary(arg === 'month' ? 30 : 7);
+    const ok = await pushSummaryTo(ids, text);
     await reply(msg, `📤 Summary DM sent to ${ok}/${ids.length} recipient(s).`);
   }
 }

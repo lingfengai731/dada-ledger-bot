@@ -10,6 +10,33 @@ function daysAgoISO(n: number): string {
   return today.toISOString().slice(0, 10);
 }
 
+/** Epoch ms of Bali (WITA, UTC+8) midnight for today — start of "today". */
+function baliMidnightMs(): number {
+  return new Date(`${baliTodayISO()}T00:00:00+08:00`).getTime();
+}
+
+/**
+ * Itemized list of everything the bot saved TODAY — DM'd to the boss each night
+ * so she can review the day in one message instead of watching the group.
+ */
+export function buildDailyDigest(): string {
+  const rows = store.expensesCreatedSince(baliMidnightMs());
+  const cur = config.currency;
+  const head = `📒 *DADA — today's ledger* (${baliTodayISO()})`;
+  if (!rows.length) return `${head}\n_No expenses recorded today._`;
+
+  const lines: string[] = [head, `${rows.length} expense${rows.length === 1 ? '' : 's'} saved today:`, ''];
+  let total = 0;
+  rows.forEach((r, i) => {
+    total += r.cost ?? 0;
+    const tag = r.is_wedding ? `wed ${r.wedding_date ?? '—'} · ${r.pic ?? '—'}` : 'non-wedding';
+    const who = r.handler ? ` · ${r.handler} paid` : '';
+    lines.push(`*${i + 1}.* ${r.vendor_description ?? '—'} — ${formatMoney(r.cost)} _(${tag}${who})_`);
+  });
+  lines.push('', `*Total today: ${formatMoney(total)} ${cur}*`);
+  return lines.join('\n');
+}
+
 /** Build a human-readable spend summary for the last `days` (default 7). */
 export function buildPeriodSummary(days = 7): string {
   const from = daysAgoISO(days - 1);

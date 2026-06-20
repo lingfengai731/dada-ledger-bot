@@ -46,8 +46,8 @@ export const config = {
   summary: {
     /** Boss WhatsApp id ("<countrycode><number>@c.us") to DM the periodic summary. Empty = off. */
     bossWhatsappId: process.env.BOSS_WHATSAPP_ID ?? '',
-    /** 'weekly' (Mondays) or 'monthly' (1st). */
-    cadence: (process.env.SUMMARY_CADENCE ?? 'weekly') as 'weekly' | 'monthly',
+    /** 'daily' (every day), 'weekly' (Mondays) or 'monthly' (1st). */
+    cadence: (process.env.SUMMARY_CADENCE ?? 'weekly') as 'daily' | 'weekly' | 'monthly',
     /** Hour (Bali time, 0-23) to send on the due day. */
     hour: Number(process.env.SUMMARY_HOUR ?? '9'),
   },

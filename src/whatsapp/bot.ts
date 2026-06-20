@@ -161,7 +161,26 @@ export function createBot() {
 
   const client = new Client({
     authStrategy: new LocalAuth({ dataPath: config.paths.waAuthDir }),
-    puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] },
+    puppeteer: {
+      headless: true,
+      // Trim the headless-Chrome footprint — whatsapp-web.js keeps a full Chrome
+      // running 24/7, which on a small VPS pegs CPU/RAM (Vultr flagged us for it).
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-accelerated-2d-canvas',
+        '--disable-extensions',
+        '--disable-background-networking',
+        '--disable-default-apps',
+        '--disable-sync',
+        '--disable-translate',
+        '--mute-audio',
+        '--no-first-run',
+        '--js-flags=--max-old-space-size=256',
+      ],
+    },
   });
   waClient = client;
 

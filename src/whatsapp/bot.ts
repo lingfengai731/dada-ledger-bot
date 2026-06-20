@@ -772,19 +772,16 @@ function renderOne(draft: ExpenseDraft): string {
     return lines.join('\n');
   }
 
+  // Boss-approved fixed layout — the same 6 fields every time (non-wedding shows
+  // "—" for the wedding fields, not a "Type: non-wedding" line).
   const lines: string[] = ['🧾 *Please confirm this expense:*', ''];
   lines.push(`*Vendor / description:* ${draft.vendorDescription ?? '???'}`);
   lines.push(`*Cost:* ${formatMoney(draft.cost)} ${config.currency}`);
-  // Invoice date (when the receipt was issued) is always shown.
   lines.push(`*Invoice date:* ${draft.invoiceDate ?? '—'}`);
-  if (draft.isWedding) {
-    // Boss's rule: a wedding always needs a wedding date + PIC; ??? when missing.
-    lines.push(`*Wedding date:* ${displayWeddingDate(draft)}`);
-    lines.push(`*PIC:* ${displayPic(draft)}`);
-  } else {
-    lines.push('*Type:* non-wedding');
-  }
-  if (draft.handler) lines.push(`*Handler:* ${draft.handler}`);
+  // A wedding always needs a wedding date + PIC; ??? when missing, — when non-wedding.
+  lines.push(`*Wedding date:* ${draft.isWedding ? displayWeddingDate(draft) : '—'}`);
+  lines.push(`*PIC:* ${draft.isWedding ? displayPic(draft) : '—'}`);
+  lines.push(`*Handler:* ${draft.handler ?? '—'}`);
   if (draft.info.length) lines.push('', 'ℹ️ ' + draft.info.join('\nℹ️ '));
   if (draft.warnings.length) lines.push('', '⚠️ ' + draft.warnings.join('\n⚠️ '));
 

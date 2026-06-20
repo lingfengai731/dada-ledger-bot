@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import io
+import gc
 import time
 import zipfile
 import sqlite3
@@ -310,6 +311,11 @@ async def embed(
             fh.write(await f.read())
         wm.watermark_image(in_path, out_path, code, visible=bool(visible), opacity=op, scale=sc, position=position)
         db.execute("INSERT OR REPLACE INTO images VALUES (?,?,?,?,?,?)", (code, shoot, note, f.filename, now, batch))
+        try:
+            os.remove(in_path)  # the original upload isn't needed after embedding
+        except OSError:
+            pass
+        gc.collect()  # release per-image arrays before the next one (512MB host)
     db.commit()
     return RedirectResponse(f"/result/{batch}", status_code=303)
 

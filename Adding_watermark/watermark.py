@@ -18,8 +18,14 @@ import secrets
 import datetime
 from functools import lru_cache
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 from blind_watermark import WaterMark
+
+# Cap the working resolution. Phone/camera photos are often 12MP+, and the
+# DWT-DCT embed allocates several float64 copies of the whole image — enough to
+# blow past a 512MB host. 2000px on the long side is plenty for web/social use
+# and cuts memory & time ~4-9x. Override with WM_MAX_SIDE.
+MAX_SIDE = int(os.environ.get("WM_MAX_SIDE", "2000"))
 
 # Secret seeds for the invisible watermark. The SAME values are needed to
 # extract, so keep them private and stable. In production they're set via env
@@ -128,6 +134,24 @@ def extract_invisible(path: str) -> str:
     return bwm.extract(path, wm_shape=wm_bit_len(), mode="str")
 
 
+def _downscaled(in_path: str, work_path: str) -> str:
+    """If the image's long side exceeds MAX_SIDE, write a downscaled, EXIF-rotated
+    copy to work_path and return it; otherwise return in_path unchanged. Keeps the
+    DWT-DCT embed within a small host's memory."""
+    try:
+        with Image.open(in_path) as im:
+            im = ImageOps.exif_transpose(im).convert("RGB")  # bake orientation
+            w, h = im.size
+            if max(w, h) <= MAX_SIDE:
+                return in_path
+            r = MAX_SIDE / max(w, h)
+            im = im.resize((max(1, round(w * r)), max(1, round(h * r))), Image.LANCZOS)
+            im.save(work_path, "JPEG", quality=95)
+            return work_path
+    except Exception:
+        return in_path  # never block watermarking just because resize failed
+
+
 def watermark_image(
     in_path: str,
     out_path: str,
@@ -139,13 +163,15 @@ def watermark_image(
     visible_text: str = "DĀDA ISLAND",
 ) -> None:
     """Apply visible mark (optional) then embed the invisible code into the result."""
+    work = out_path + ".src.jpg"
+    src = _downscaled(in_path, work)  # cap resolution first (memory/time)
     tmp = out_path + ".tmp.png"
-    src = in_path
     if visible:
-        add_visible(in_path, tmp, opacity=opacity, scale=scale, position=position, text=visible_text)
+        add_visible(src, tmp, opacity=opacity, scale=scale, position=position, text=visible_text)
         src = tmp
     try:
         embed_invisible(src, out_path, code)
     finally:
-        if os.path.exists(tmp):
-            os.remove(tmp)
+        for p in (tmp, work):
+            if p != in_path and os.path.exists(p):
+                os.remove(p)

@@ -22,7 +22,9 @@ type WAChat = pkg.Chat;
 
 const SUPPORTED_IMAGE = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const SUPPORTED_MEDIA = new Set([...SUPPORTED_IMAGE, 'application/pdf']);
-const DEBOUNCE_MS = 10 * 1000;
+// How long to wait for related messages (a photo + its note, or a transfer
+// screenshot + "Reimbursement <name>") before processing them together.
+const DEBOUNCE_MS = 20 * 1000;
 const MERGE_WINDOW_MS = 5 * 60 * 1000;
 const CONFIRM_WORDS = new Set(['ok', 'okay', 'okk', 'yes', 'y', 'ya', 'yep', 'yeah', 'confirm', 'confirmed', 'oke', 'betul', 'save', 'sip', 'good']);
 const CANCEL_WORDS = new Set(['cancel', 'no', 'nope', 'batal', 'skip']);

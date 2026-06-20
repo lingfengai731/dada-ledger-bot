@@ -97,7 +97,10 @@ function buildProperties(
     'VENDOR / DESCRIPTION': { title: [{ text: { content: title } }] },
   };
 
-  if (draft.cost != null) {
+  if (draft.isReimbursement) {
+    // Reimbursement: amount goes to REIMBURSED, not COST; no wedding/PIC.
+    if (draft.reimbursed != null) properties['REIMBURSED'] = { number: draft.reimbursed };
+  } else if (draft.cost != null) {
     properties['COST'] = { number: draft.cost };
     properties['PRICE'] = { number: draft.cost }; // historical rows fill PRICE = COST
   }

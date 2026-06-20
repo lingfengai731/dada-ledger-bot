@@ -20,6 +20,10 @@ export interface ExpenseDraft {
   invoiceDate: string | null;
   /** "COST" in whole Rupiah. */
   cost: number | null;
+  /** "REIMBURSED" in whole Rupiah — set instead of cost for reimbursements. */
+  reimbursed: number | null;
+  /** true when this is Ling reimbursing a staff member (writes REIMBURSED, no COST/PIC/wedding). */
+  isReimbursement: boolean;
   /** Raw PIC name from the note (mapped to a Notion option at write time). */
   pic: string | null;
   /** Raw HANDLER / payer name, mapped at write time. */
@@ -48,15 +52,77 @@ const PEOPLE_ALIAS: Record<string, string> = {
   JESICCA: 'JESICHA', JESSICHA: 'JESICHA',
 };
 
-/** Map a free name (sender display name, "TO X", "by X") to a known person, else null. */
+/** Map a free name (sender display name, "TO X", a transfer's full name) to a known person. */
 export function matchPerson(name: string | null | undefined): string | null {
   if (!name) return null;
-  let up = name.trim().toUpperCase();
-  if (!up) return null;
-  up = PEOPLE_ALIAS[up] ?? up;
-  return (
-    KNOWN_PEOPLE.find((k) => k === up || up.startsWith(k) || k.startsWith(up) || up.includes(k)) ?? null
-  );
+  const raw = name.trim().toUpperCase();
+  if (!raw) return null;
+  const tryOne = (t: string): string | null => {
+    const up = PEOPLE_ALIAS[t] ?? t;
+    // Exact, or one is a prefix of the other (min 4 chars) — NO loose substring
+    // matching, or "LING" would match inside "rosaLINGga".
+    return (
+      KNOWN_PEOPLE.find(
+        (k) => k === up || (up.length >= 4 && k.startsWith(up)) || (k.length >= 4 && up.startsWith(k)),
+      ) ?? null
+    );
+  };
+  // Whole string first, then each token — handles bank names like
+  // "ANDRIAN ROSALINGGA CHRIS" (→CHRISTI) or "RADEN RORO PUTRI RADITYA" (→PUTRI).
+  const whole = tryOne(raw);
+  if (whole) return whole;
+  for (const tok of raw.split(/\s+/)) {
+    if (tok.length < 3) continue;
+    const m = tryOne(tok);
+    if (m) return m;
+  }
+  return null;
+}
+
+/** Tidy a bank-transfer name for display: known person → canonical, else Title Case. */
+function displayPerson(raw: string | null): string {
+  const known = matchPerson(raw);
+  if (known) return known;
+  return (raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase()) || '???';
+}
+
+/**
+ * A reimbursement (Ling paying a staff member back). Amount goes to the REIMBURSED
+ * column, not COST; no wedding date / PIC. Recipient comes from the transfer's "To".
+ */
+export function buildReimbursementDraft(
+  recipientRaw: string | null,
+  amount: number | null,
+  imagePath: string | null,
+  rawNote = '',
+): ExpenseDraft {
+  const who = displayPerson(recipientRaw);
+  const handler = matchPerson(recipientRaw);
+  const warnings: string[] = [];
+  if (amount == null) warnings.push('Could not read the transfer amount — please check.');
+  return {
+    vendorDescription: `Reimbursement ${who}`,
+    vendor: 'Reimbursement',
+    description: who,
+    weddingDate: null,
+    weddingEnd: null,
+    invoiceDate: null,
+    cost: null,
+    reimbursed: amount,
+    isReimbursement: true,
+    pic: null,
+    handler,
+    location: null,
+    isWedding: false,
+    confidence: 0.9,
+    warnings,
+    info: [],
+    imagePath,
+    rawNote,
+  };
 }
 
 /**
@@ -172,6 +238,8 @@ export function mergeToDraft(
     weddingEnd: null,
     invoiceDate: note.invoiceDate ?? receipt?.date ?? null,
     cost,
+    reimbursed: null,
+    isReimbursement: false,
     pic: note.pic,
     handler,
     location: note.location,

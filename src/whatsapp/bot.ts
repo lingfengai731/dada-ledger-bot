@@ -7,7 +7,7 @@ import { logger } from '../logger.js';
 import { store } from '../db/store.js';
 import { extractReceipts } from '../agents/visionAgent.js';
 import { parseEmployeeNotes, parseEmployeeNote } from '../agents/messageParser.js';
-import { mergeToDraft, recomputeVendorDescription, matchPerson, type ExpenseDraft } from '../expense.js';
+import { mergeToDraft, recomputeVendorDescription, matchPerson, buildReimbursementDraft, type ExpenseDraft } from '../expense.js';
 import { writeExpense, archiveExpense } from '../notion/expenses.js';
 import { answerQuestion } from '../agents/queryAgent.js';
 import { enrichDraft, missingRequired, displayWeddingDate, displayPic } from '../schedule/enrich.js';
@@ -460,12 +460,24 @@ async function readReceipt(img: BufferedImage): Promise<Receipt | null> {
   return receipts[0] ?? null;
 }
 
+/** A "Reimbursement …" note means Ling is paying a staff member back. */
+function isReimbursementText(text: string): boolean {
+  return /\breimburse(ment|d)?\b/i.test(text);
+}
+
 async function buildFromCollection(
   msg: WAMessage,
   sender: string,
   noteText: string,
   img: BufferedImage | null,
 ): Promise<void> {
+  // Reimbursement: read the bank-transfer screenshot(s); each transfer = one row
+  // with the amount in REIMBURSED (no COST / wedding / PIC).
+  if (img && isReimbursementText(noteText)) {
+    await buildReimbursement(msg, sender, noteText, img);
+    return;
+  }
+
   const notes = noteText.trim() ? await parseEmployeeNotes(noteText) : [{ ...EMPTY_NOTE }];
   let receipt: Receipt | null = null;
   const extra: string[] = [];
@@ -476,6 +488,34 @@ async function buildFromCollection(
     extra.push('No photo attached — recorded from your note only.');
   }
   await finalize(msg, sender, notes, receipt, img?.imagePath ?? null, extra);
+}
+
+/** Build reimbursement draft(s) from a transfer screenshot + "Reimbursement <name>" note. */
+async function buildReimbursement(
+  msg: WAMessage,
+  sender: string,
+  noteText: string,
+  img: BufferedImage,
+): Promise<void> {
+  const transfers = await extractReceipts(img.data, img.mimetype, 'reimbursement');
+  // A name typed after "Reimbursement" (e.g. "Reimbursement Christi") overrides the
+  // transfer's "To" name when there's exactly one transfer.
+  const typedName = noteText.replace(/.*\breimburse(ment|d)?\b/i, '').trim() || null;
+  const drafts = transfers.length
+    ? transfers.map((t) =>
+        buildReimbursementDraft(
+          transfers.length === 1 && typedName ? typedName : t.recipient,
+          t.total,
+          img.imagePath,
+          noteText,
+        ),
+      )
+    : [buildReimbursementDraft(typedName, null, img.imagePath, noteText)];
+  if (!transfers.length) drafts[0].warnings.push('Could not read any transfer in the screenshot — please check.');
+
+  const chatId = msg.from;
+  persistPending(sender, { drafts, notes: [], receipt: null, imagePath: img.imagePath, ts: Date.now(), waMessageId: msg.id._serialized, chatId });
+  await reply(msg, renderSummary(drafts));
 }
 
 /** The sender's WhatsApp display name (used to infer the handler in the real group). */
@@ -589,6 +629,7 @@ async function savePending(pending: Pending, sender: string): Promise<{ savedToN
       weddingDate: draft.weddingDate,
       invoiceDate: draft.invoiceDate,
       cost: draft.cost,
+      reimbursed: draft.reimbursed,
       pic: draft.pic,
       handler: draft.handler,
       isWedding: draft.isWedding,
@@ -596,7 +637,7 @@ async function savePending(pending: Pending, sender: string): Promise<{ savedToN
       rawNote: draft.rawNote,
       notionPageId: result.pageId,
     });
-    total += draft.cost ?? 0;
+    total += draft.cost ?? draft.reimbursed ?? 0;
   }
   return { savedToNotion, total, count: pending.drafts.length };
 }
@@ -683,6 +724,11 @@ function renderSummary(drafts: ExpenseDraft[]): string {
   const lines: string[] = [`🧾 *Please confirm these ${drafts.length} expenses:*`, ''];
   let total = 0;
   drafts.forEach((d, i) => {
+    if (d.isReimbursement) {
+      total += d.reimbursed ?? 0;
+      lines.push(`*${i + 1}.* ${d.vendorDescription ?? '???'} — ${formatMoney(d.reimbursed)} _(reimbursement)_`);
+      return;
+    }
     total += d.cost ?? 0;
     const inv = d.invoiceDate ? `inv ${d.invoiceDate}` : 'inv —';
     const tag = d.isWedding ? `${inv} · wed ${displayWeddingDate(d)} · ${displayPic(d)}` : `${inv} · non-wedding`;
@@ -704,6 +750,19 @@ function renderSummary(drafts: ExpenseDraft[]): string {
 }
 
 function renderOne(draft: ExpenseDraft): string {
+  if (draft.isReimbursement) {
+    const lines = [
+      '💸 *Please confirm this reimbursement:*',
+      '',
+      `*Reimbursed to:* ${draft.handler ?? draft.description ?? '???'}`,
+      `*Amount:* ${formatMoney(draft.reimbursed)} ${config.currency}`,
+    ];
+    if (draft.info.length) lines.push('', 'ℹ️ ' + draft.info.join('\nℹ️ '));
+    if (draft.warnings.length) lines.push('', '⚠️ ' + draft.warnings.join('\n⚠️ '));
+    lines.push('', 'Reply *ok* to save, *cancel* to discard.');
+    return lines.join('\n');
+  }
+
   const lines: string[] = ['🧾 *Please confirm this expense:*', ''];
   lines.push(`*Vendor / description:* ${draft.vendorDescription ?? '???'}`);
   lines.push(`*Cost:* ${formatMoney(draft.cost)} ${config.currency}`);

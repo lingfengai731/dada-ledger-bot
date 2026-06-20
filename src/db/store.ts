@@ -80,6 +80,11 @@ db.exec(`
   );
 `);
 
+// Migration: add the reimbursed column to existing expenses tables.
+if (!(db.prepare('PRAGMA table_info(expenses)').all() as any[]).some((c) => c.name === 'reimbursed')) {
+  db.exec('ALTER TABLE expenses ADD COLUMN reimbursed INTEGER');
+}
+
 export interface InsertReceiptInput {
   waMessageId: string;
   receiptIndex: number;
@@ -194,6 +199,7 @@ export const store = {
     weddingDate: string | null;
     invoiceDate: string | null;
     cost: number | null;
+    reimbursed?: number | null;
     pic: string | null;
     handler: string | null;
     isWedding: boolean;
@@ -205,8 +211,8 @@ export const store = {
       .prepare(
         `INSERT INTO expenses
           (wa_message_id, submitter, vendor_description, wedding_date, invoice_date,
-           cost, pic, handler, is_wedding, image_path, raw_note, notion_page_id, created_at)
-         VALUES (@wa, @submitter, @vendor, @wdate, @idate, @cost, @pic, @handler,
+           cost, reimbursed, pic, handler, is_wedding, image_path, raw_note, notion_page_id, created_at)
+         VALUES (@wa, @submitter, @vendor, @wdate, @idate, @cost, @reimbursed, @pic, @handler,
                  @isw, @img, @note, @notion, @created)`,
       )
       .run({
@@ -216,6 +222,7 @@ export const store = {
         wdate: e.weddingDate,
         idate: e.invoiceDate,
         cost: e.cost,
+        reimbursed: e.reimbursed ?? null,
         pic: e.pic,
         handler: e.handler,
         isw: e.isWedding ? 1 : 0,
@@ -303,12 +310,12 @@ export const store = {
   /** Expenses the bot SAVED since an epoch-ms instant (for the nightly digest). */
   expensesCreatedSince(sinceMs: number): {
     id: number; vendor_description: string | null; wedding_date: string | null;
-    invoice_date: string | null; cost: number | null; pic: string | null;
-    handler: string | null; is_wedding: number; created_at: number;
+    invoice_date: string | null; cost: number | null; reimbursed: number | null;
+    pic: string | null; handler: string | null; is_wedding: number; created_at: number;
   }[] {
     return db
       .prepare(
-        `SELECT id, vendor_description, wedding_date, invoice_date, cost, pic, handler, is_wedding, created_at
+        `SELECT id, vendor_description, wedding_date, invoice_date, cost, reimbursed, pic, handler, is_wedding, created_at
          FROM expenses WHERE created_at >= ? ORDER BY created_at ASC`,
       )
       .all(sinceMs) as any[];

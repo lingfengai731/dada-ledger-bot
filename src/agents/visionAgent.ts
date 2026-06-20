@@ -51,12 +51,44 @@ Respond with ONLY a JSON object (no markdown, no commentary) of this exact shape
   ]
 }`;
 
+// Reimbursement mode: the image is a BANK TRANSFER screenshot, not a receipt.
+const TRANSFER_SYSTEM = `You read screenshots of Indonesian bank transfers that "DADA Island" uses to
+record REIMBURSEMENTS — the company (STUDIO DADA BALI) paying money back to a staff member.
+
+A screenshot may contain ONE or SEVERAL transfers. Each transfer block shows:
+- a heading like "Domestic Transfer" / "Transfer",
+- an amount like "IDR 1,285,230.00" (the money sent),
+- "From ... STUDIO DADA BALI ..." (always the company — IGNORE this),
+- "To  <account> <PERSON NAME>" (the staff member being reimbursed — THIS is who we want).
+
+CRITICAL number rules: amounts use "," as thousands and "." before the cents.
+"IDR 1,285,230.00" = 1285230 rupiah. "4,517,500.00" = 4517500. Output whole-rupiah integers (drop cents).
+
+Return ONE object per transfer. Never invent transfers or amounts.`;
+
+const TRANSFER_INSTRUCTION = `Extract every bank transfer in this screenshot.
+
+Respond with ONLY a JSON object (no markdown) of this exact shape:
+{
+  "receipts": [
+    {
+      "vendor": "Reimbursement",
+      "recipient": string | null,   // the "To" person's name (who is reimbursed)
+      "total": number | null,       // the transferred amount, whole Rupiah
+      "items": [],
+      "confidence": number,
+      "notes": string | null
+    }
+  ]
+}`;
+
 type RawReceipt = Partial<Receipt> & { items?: Partial<Receipt['items'][number]>[] };
 
-/** Read every receipt in one image OR PDF. Returns [] if none could be parsed. */
+/** Read every receipt (or, in 'reimbursement' mode, bank transfer) in one image/PDF. */
 export async function extractReceipts(
   base64: string,
   mediaType: string,
+  mode: 'receipt' | 'reimbursement' = 'receipt',
 ): Promise<Receipt[]> {
   const isPdf = mediaType === 'application/pdf';
   const mediaBlock = isPdf
@@ -66,11 +98,11 @@ export async function extractReceipts(
   const response = await claude.messages.create({
     model: MODEL,
     max_tokens: 4096,
-    system: SYSTEM,
+    system: mode === 'reimbursement' ? TRANSFER_SYSTEM : SYSTEM,
     messages: [
       {
         role: 'user',
-        content: [mediaBlock as any, { type: 'text', text: INSTRUCTION }],
+        content: [mediaBlock as any, { type: 'text', text: mode === 'reimbursement' ? TRANSFER_INSTRUCTION : INSTRUCTION }],
       },
     ],
   });

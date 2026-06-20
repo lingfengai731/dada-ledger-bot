@@ -25,15 +25,32 @@ export function buildDailyDigest(): string {
   const head = `📒 *DADA — today's ledger* (${baliTodayISO()})`;
   if (!rows.length) return `${head}\n_No expenses recorded today._`;
 
-  const lines: string[] = [head, `${rows.length} expense${rows.length === 1 ? '' : 's'} saved today:`, ''];
-  let total = 0;
-  rows.forEach((r, i) => {
-    total += r.cost ?? 0;
-    const tag = r.is_wedding ? `wed ${r.wedding_date ?? '—'} · ${r.pic ?? '—'}` : 'non-wedding';
-    const who = r.handler ? ` · ${r.handler} paid` : '';
-    lines.push(`*${i + 1}.* ${r.vendor_description ?? '—'} — ${formatMoney(r.cost)} _(${tag}${who})_`);
-  });
-  lines.push('', `*Total today: ${formatMoney(total)} ${cur}*`);
+  const expenses = rows.filter((r) => r.reimbursed == null);
+  const reimb = rows.filter((r) => r.reimbursed != null);
+  const lines: string[] = [head, ''];
+
+  if (expenses.length) {
+    lines.push(`*Expenses (${expenses.length}):*`);
+    let total = 0;
+    expenses.forEach((r, i) => {
+      total += r.cost ?? 0;
+      const tag = r.is_wedding ? `wed ${r.wedding_date ?? '—'} · ${r.pic ?? '—'}` : 'non-wedding';
+      const who = r.handler ? ` · ${r.handler} paid` : '';
+      lines.push(`*${i + 1}.* ${r.vendor_description ?? '—'} — ${formatMoney(r.cost)} _(${tag}${who})_`);
+    });
+    lines.push(`*Spend total: ${formatMoney(total)} ${cur}*`);
+  }
+
+  if (reimb.length) {
+    lines.push('', `*Reimbursements (${reimb.length}):*`);
+    let total = 0;
+    reimb.forEach((r, i) => {
+      total += r.reimbursed ?? 0;
+      lines.push(`*${i + 1}.* ${r.handler ?? r.vendor_description ?? '—'} — ${formatMoney(r.reimbursed)}`);
+    });
+    lines.push(`*Reimbursed total: ${formatMoney(total)} ${cur}*`);
+  }
+
   return lines.join('\n');
 }
 

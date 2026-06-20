@@ -14,6 +14,8 @@ export interface ExpenseDraft {
   description: string | null;
   /** "WEDDING DATE" (ISO) — null for non-wedding expenses. */
   weddingDate: string | null;
+  /** Last day of a multi-day wedding (ISO), when the schedule stores a range. */
+  weddingEnd: string | null;
   /** "INVOICE DATE" (ISO) — from the receipt. */
   invoiceDate: string | null;
   /** "COST" in whole Rupiah. */
@@ -150,6 +152,7 @@ export function mergeToDraft(
     vendor,
     description,
     weddingDate: isWedding ? note.weddingDate : null,
+    weddingEnd: null,
     invoiceDate: note.invoiceDate ?? receipt?.date ?? null,
     cost,
     pic: note.pic,

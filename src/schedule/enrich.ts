@@ -24,7 +24,12 @@ export function missingRequired(draft: ExpenseDraft): string[] {
 }
 
 export function displayWeddingDate(draft: ExpenseDraft): string {
-  return draft.weddingDate ?? MISSING;
+  if (!draft.weddingDate) return MISSING;
+  // Multi-day wedding → show the range (e.g. "2026-06-21 → 2026-06-22").
+  if (draft.weddingEnd && draft.weddingEnd !== draft.weddingDate) {
+    return `${draft.weddingDate} → ${draft.weddingEnd}`;
+  }
+  return draft.weddingDate;
 }
 export function displayPic(draft: ExpenseDraft): string {
   return draft.pic ?? MISSING;
@@ -104,6 +109,9 @@ export function enrichDraft(draft: ExpenseDraft): string[] {
           notes.push(`PIC set to ${p} from the schedule (${target.client || target.venue}).`);
         }
       }
+      // Carry the multi-day end date from the matching schedule entry.
+      const chosen = venues.find((e) => e.weddingDate === draft.weddingDate);
+      if (chosen) draft.weddingEnd = chosen.weddingEnd;
       const otherDates = [...new Set(venues.map((e) => e.weddingDate))].filter((d) => d !== draft.weddingDate);
       if (otherDates.length) {
         const shown = otherDates.slice(0, 3).join(', ');
@@ -129,6 +137,7 @@ export function enrichDraft(draft: ExpenseDraft): string[] {
       if (match && match.confidence >= 0.6) {
         if (needDate && match.weddingDate) {
           draft.weddingDate = match.weddingDate;
+          draft.weddingEnd = match.weddingEnd;
           notes.push(
             `Wedding date set to ${match.weddingDate} from the schedule (${match.client || match.venue}).`,
           );

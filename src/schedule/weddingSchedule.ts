@@ -29,6 +29,7 @@ export interface ScheduleEntry {
 
 export interface ScheduleMatch {
   weddingDate: string;
+  weddingEnd: string | null;
   pic: string | null;
   venue: string;
   client: string;
@@ -318,6 +319,7 @@ export function lookupSchedule(opts: {
       const best = pool[0];
       return {
         weddingDate: best.weddingDate,
+        weddingEnd: best.weddingEnd,
         pic: pickPic(best, picHint),
         venue: best.venue,
         client: best.client,
@@ -361,6 +363,7 @@ export function lookupSchedule(opts: {
       }
       return {
         weddingDate: best.weddingDate,
+        weddingEnd: best.weddingEnd,
         pic: pickPic(best, picHint),
         venue: best.venue,
         client: best.client,
@@ -381,6 +384,7 @@ export function lookupSchedule(opts: {
         const best = cands[0];
         return {
           weddingDate: best.weddingDate,
+          weddingEnd: best.weddingEnd,
           pic: pickPic(best, picHint),
           venue: best.venue,
           client: best.client,

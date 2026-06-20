@@ -23,4 +23,5 @@ console.log('vendorDescription:', d.vendorDescription, '   (want: kyea, potatoes
 console.log('handler          :', d.handler, '   (want: CHRISTI — from "TO CHRISTI")');
 console.log('pic              :', d.pic, '   (want: CHRISTI — schedule, since trf-ling is not pic)');
 console.log('weddingDate      :', d.weddingDate, '   (want: 2026-06-21)');
+console.log('weddingEnd       :', d.weddingEnd, '   (want: 2026-06-22 — multi-day range)');
 console.log('cost             :', d.cost);

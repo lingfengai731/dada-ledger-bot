@@ -5,7 +5,7 @@ import type { ExpenseDraft } from '../expense.js';
 
 const draft: ExpenseDraft = {
   vendorDescription: 'TEST ONLY — do not save', vendor: null, description: 'TEST ONLY — do not save',
-  weddingDate: '2026-06-16', invoiceDate: '2026-06-15',
+  weddingDate: '2026-06-16', weddingEnd: null, invoiceDate: '2026-06-15',
   cost: 1000, pic: 'christi', handler: 'rania', location: 'komaneka', isWedding: true,
   confidence: 1, warnings: [], info: [], imagePath: null, rawNote: 'test',
 };

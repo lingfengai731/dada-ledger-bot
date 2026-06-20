@@ -36,11 +36,63 @@ interface Pending {
   imagePath: string | null;
   ts: number;
   waMessageId: string;
+  /** The chat (group) to post the auto-save / reminder back to. */
+  chatId: string;
 }
+
+// A draft nobody replied "ok" to is auto-saved after this long (boss's rule:
+// don't lose expenses just because staff forgot to confirm). The clock runs from
+// the last time the draft was shown or corrected.
+const AUTO_WRITE_MS = 8 * 60 * 60 * 1000;
+const SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 
 const collecting = new Map<string, Collecting>();
 const pendingDrafts = new Map<string, Pending>();
 let waClient: pkg.Client | null = null;
+let pendingRestored = false;
+
+/** Save/replace a sender's open draft to the DB so it survives a restart and
+ *  the auto-write sweep can find it. Keeps the in-memory map authoritative. */
+function persistPending(sender: string, p: Pending): void {
+  pendingDrafts.set(sender, p);
+  try {
+    store.upsertPending({
+      sender,
+      chatId: p.chatId,
+      waMessageId: p.waMessageId,
+      payloadJson: JSON.stringify(p),
+      updatedAt: p.ts,
+    });
+  } catch (err) {
+    logger.error({ err }, 'failed to persist pending draft');
+  }
+}
+
+/** Drop a sender's open draft from both memory and the DB. */
+function clearPending(sender: string): void {
+  pendingDrafts.delete(sender);
+  try {
+    store.deletePending(sender);
+  } catch (err) {
+    logger.error({ err }, 'failed to clear pending draft');
+  }
+}
+
+/** Re-load drafts left open before a restart so "ok" still works. Runs once. */
+function restorePending(): void {
+  if (pendingRestored) return;
+  pendingRestored = true;
+  let n = 0;
+  for (const row of store.allPending()) {
+    try {
+      pendingDrafts.set(row.sender, JSON.parse(row.payload_json) as Pending);
+      n++;
+    } catch {
+      store.deletePending(row.sender);
+    }
+  }
+  if (n) logger.info({ count: n }, 'restored pending drafts from DB');
+}
 
 /** Normalized boss DM ids from BOSS_WHATSAPP_ID (comma-separated numbers or *@c.us). */
 function bossIds(): string[] {
@@ -97,6 +149,7 @@ const INTRO_MESSAGE = [
 
 export function createBot() {
   fs.mkdirSync(config.paths.imagesDir, { recursive: true });
+  restorePending();
 
   const client = new Client({
     authStrategy: new LocalAuth({ dataPath: config.paths.waAuthDir }),
@@ -171,6 +224,12 @@ export function createBot() {
   }, 20 * 60 * 1000);
   summaryTimer.unref?.();
 
+  // Auto-write sweep: save drafts nobody confirmed after AUTO_WRITE_MS.
+  const sweepTimer = setInterval(() => {
+    sweepPending().catch((err) => logger.error({ err }, 'pending sweep failed'));
+  }, SWEEP_INTERVAL_MS);
+  sweepTimer.unref?.();
+
   client.on('ready', async () => {
     logger.info('WhatsApp client ready ✅');
     try {
@@ -243,7 +302,7 @@ async function handleMessage(msg: WAMessage): Promise<void> {
       return;
     }
     if (CANCEL_WORDS.has(word)) {
-      pendingDrafts.delete(sender);
+      clearPending(sender);
       await reply(msg, '🗑️ Cancelled — nothing was saved.');
       return;
     }
@@ -300,6 +359,7 @@ async function onNote(msg: WAMessage, sender: string, text: string): Promise<voi
       applyCorrection(pending.drafts[0], follow);
       enrichDraft(pending.drafts[0]);
       pending.ts = Date.now();
+      persistPending(sender, pending);
       await reply(msg, renderSummary(pending.drafts));
     }
     return;
@@ -410,6 +470,7 @@ async function finalize(
 ): Promise<void> {
   // Whoever posts the bill is usually the handler — resolve their display name.
   const senderName = await resolveSenderName(msg);
+  const chatId = msg.from; // the group jid (where to post the auto-save later)
   // The photo (if any) only enriches the first expense in a multi-expense message.
   const drafts = notes.map((n, i) => {
     const d = mergeToDraft(n, i === 0 ? receipt : null, i === 0 ? imagePath : null, senderName);
@@ -428,7 +489,7 @@ async function finalize(
     }
     return d;
   });
-  pendingDrafts.set(sender, { drafts, notes, receipt, imagePath, ts: Date.now(), waMessageId: msg.id._serialized });
+  persistPending(sender, { drafts, notes, receipt, imagePath, ts: Date.now(), waMessageId: msg.id._serialized, chatId });
   await reply(msg, renderSummary(drafts));
 }
 
@@ -443,6 +504,7 @@ async function commit(msg: WAMessage, sender: string): Promise<void> {
     .filter((x) => x.missing.length);
   if (blocked.length) {
     pending.ts = Date.now(); // keep the draft alive so they can correct it
+    persistPending(sender, pending);
     const lines = ['🚫 *Not saved yet — missing required info:*', ''];
     for (const b of blocked) {
       const label = pending.drafts.length > 1 ? `*${b.i + 1}.* ` : '';
@@ -453,8 +515,19 @@ async function commit(msg: WAMessage, sender: string): Promise<void> {
     return;
   }
 
-  pendingDrafts.delete(sender);
+  clearPending(sender);
+  const { savedToNotion, total, count } = await savePending(pending, sender);
 
+  if (savedToNotion > 0) {
+    await reply(msg, `✅ Saved ${savedToNotion} expense${savedToNotion > 1 ? 's' : ''} to Notion. Total ${formatMoney(total)} ${config.currency}.`);
+  } else {
+    await reply(msg, `✅ Recorded ${count} expense${count > 1 ? 's' : ''} (${formatMoney(total)} ${config.currency}).\n_Notion preview mode — not written yet._`);
+  }
+}
+
+/** Write every draft in a pending set to Notion + the local store. Shared by the
+ *  manual "ok" path and the 8-hour auto-write sweep. */
+async function savePending(pending: Pending, sender: string): Promise<{ savedToNotion: number; total: number; count: number }> {
   let savedToNotion = 0;
   let total = 0;
   for (const draft of pending.drafts) {
@@ -476,12 +549,58 @@ async function commit(msg: WAMessage, sender: string): Promise<void> {
     });
     total += draft.cost ?? 0;
   }
+  return { savedToNotion, total, count: pending.drafts.length };
+}
 
-  const n = pending.drafts.length;
-  if (savedToNotion > 0) {
-    await reply(msg, `✅ Saved ${savedToNotion} expense${savedToNotion > 1 ? 's' : ''} to Notion. Total ${formatMoney(total)} ${config.currency}.`);
-  } else {
-    await reply(msg, `✅ Recorded ${n} expense${n > 1 ? 's' : ''} (${formatMoney(total)} ${config.currency}).\n_Notion preview mode — not written yet._`);
+/**
+ * Periodically save drafts nobody confirmed. A draft that still has everything it
+ * needs (no ???) is written after AUTO_WRITE_MS and announced in the group. A draft
+ * still missing required fields can't be saved — we nudge once and leave it.
+ */
+async function sweepPending(): Promise<void> {
+  const cutoff = Date.now() - AUTO_WRITE_MS;
+  for (const row of store.pendingOlderThan(cutoff)) {
+    let pending: Pending;
+    try {
+      pending = JSON.parse(row.payload_json) as Pending;
+    } catch {
+      store.deletePending(row.sender);
+      continue;
+    }
+
+    const stillMissing = pending.drafts.some((d) => missingRequired(d).length);
+    if (stillMissing) {
+      if (!row.reminded) {
+        const text =
+          '⏰ Reminder: a receipt is still waiting on its *wedding date* / *PIC* before I can save it. ' +
+          'Please reply with the missing detail, then *ok*.';
+        try {
+          if (!config.dryRun) await waClient?.sendMessage(row.chat_id, text);
+          else logger.info('\n[auto-reminder preview]\n' + text);
+        } catch (err) {
+          logger.error({ err }, 'auto-reminder send failed');
+        }
+        store.markPendingReminded(row.sender);
+      }
+      continue;
+    }
+
+    clearPending(row.sender);
+    const { savedToNotion, total, count } = await savePending(pending, row.sender);
+    const items = pending.drafts
+      .map((d) => `• ${d.vendorDescription ?? '???'} — ${formatMoney(d.cost)}`)
+      .join('\n');
+    const where = savedToNotion > 0 ? 'to Notion' : '(preview mode — not written to Notion)';
+    const text =
+      `⏱️ Auto-saved ${count} expense${count > 1 ? 's' : ''} ${where} after 8h with no *ok* reply:\n` +
+      `${items}\n*Total ${formatMoney(total)} ${config.currency}.*\nReply */undo* if any of these is wrong.`;
+    try {
+      if (!config.dryRun) await waClient?.sendMessage(row.chat_id, text);
+      else logger.info('\n[auto-save preview]\n' + text);
+    } catch (err) {
+      logger.error({ err }, 'auto-save announce failed');
+    }
+    logger.info({ sender: row.sender, count, savedToNotion }, 'auto-saved pending drafts after grace period');
   }
 }
 

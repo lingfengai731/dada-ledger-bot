@@ -57,6 +57,17 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_expenses_wdate ON expenses(wedding_date);
   CREATE INDEX IF NOT EXISTS idx_expenses_pic ON expenses(pic);
+
+  -- Drafts awaiting an "ok". Persisted so they survive a restart and so a sweep
+  -- can auto-save the ones nobody replied to after a grace period.
+  CREATE TABLE IF NOT EXISTS pending_drafts (
+    sender        TEXT PRIMARY KEY,   -- one open draft set per submitter
+    chat_id       TEXT NOT NULL,      -- where to post the auto-save / reminder
+    wa_message_id TEXT,
+    payload_json  TEXT NOT NULL,      -- the serialized Pending (drafts, notes, ...)
+    updated_at    INTEGER NOT NULL,   -- last shown/corrected; the 8h clock runs from here
+    reminded      INTEGER NOT NULL DEFAULT 0
+  );
 `);
 
 export interface InsertReceiptInput {
@@ -332,6 +343,42 @@ export const store = {
          FROM expenses ${clause} ORDER BY COALESCE(wedding_date, invoice_date) DESC, id DESC LIMIT ${limit}`,
       )
       .all(params);
+  },
+
+  // ---- pending drafts (awaiting "ok"; auto-saved after a grace period) ----
+
+  /** Create/replace the open draft set for a submitter. */
+  upsertPending(p: {
+    sender: string;
+    chatId: string;
+    waMessageId: string | null;
+    payloadJson: string;
+    updatedAt: number;
+  }): void {
+    db.prepare(
+      `INSERT INTO pending_drafts (sender, chat_id, wa_message_id, payload_json, updated_at, reminded)
+       VALUES (@sender, @chat, @wa, @payload, @updated, 0)
+       ON CONFLICT(sender) DO UPDATE SET
+         chat_id=@chat, wa_message_id=@wa, payload_json=@payload, updated_at=@updated, reminded=0`,
+    ).run({ sender: p.sender, chat: p.chatId, wa: p.waMessageId, payload: p.payloadJson, updated: p.updatedAt });
+  },
+
+  deletePending(sender: string): void {
+    db.prepare('DELETE FROM pending_drafts WHERE sender = ?').run(sender);
+  },
+
+  markPendingReminded(sender: string): void {
+    db.prepare('UPDATE pending_drafts SET reminded = 1 WHERE sender = ?').run(sender);
+  },
+
+  /** All open drafts (used to restore the in-memory map on startup). */
+  allPending(): { sender: string; chat_id: string; wa_message_id: string | null; payload_json: string; updated_at: number; reminded: number }[] {
+    return db.prepare('SELECT * FROM pending_drafts').all() as any[];
+  },
+
+  /** Open drafts last touched before `cutoff` (epoch ms) — candidates for auto-save. */
+  pendingOlderThan(cutoff: number): { sender: string; chat_id: string; wa_message_id: string | null; payload_json: string; updated_at: number; reminded: number }[] {
+    return db.prepare('SELECT * FROM pending_drafts WHERE updated_at < ?').all(cutoff) as any[];
   },
 
   /** Aggregate total + count for a filter set. */

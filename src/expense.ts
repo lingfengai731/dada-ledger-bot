@@ -97,14 +97,31 @@ function pickHandler(
   return { handler, conflict };
 }
 
-/** Combine vendor + description into the title, de-duped; null if both empty. */
+function sigWords(s: string): string[] {
+  return s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
+}
+
+/**
+ * Combine vendor + description into the title, but keep it SHORT (boss's ask):
+ * if the note's description already references the receipt vendor (overlapping
+ * words, e.g. vendor "Lion Parcel Surabaya" and desc "...to Lion Parcel"), keep
+ * just the description. Only join both when each adds new information.
+ */
 export function combineVendorDescription(vendor: string | null, description: string | null): string | null {
-  const parts: string[] = [];
-  for (const x of [vendor, description]) {
-    const t = (x ?? '').trim();
-    if (t && !parts.some((p) => p.toLowerCase() === t.toLowerCase())) parts.push(t);
+  const v = (vendor ?? '').trim();
+  const d = (description ?? '').trim();
+  if (!v) return d || null;
+  if (!d) return v || null;
+  if (v.toLowerCase() === d.toLowerCase()) return d;
+  // If half-or-more of the vendor's significant words already appear in the
+  // description, the vendor is redundant — drop it.
+  const vw = sigWords(v);
+  if (vw.length) {
+    const dw = new Set(sigWords(d));
+    const overlap = vw.filter((w) => dw.has(w)).length;
+    if (overlap / vw.length >= 0.5) return d;
   }
-  return parts.length ? parts.join(', ') : null;
+  return `${v}, ${d}`;
 }
 
 /** Recompute the combined title after vendor/description change (e.g. a correction). */

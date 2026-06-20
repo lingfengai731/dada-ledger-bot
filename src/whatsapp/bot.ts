@@ -315,8 +315,12 @@ async function handleMessage(msg: WAMessage): Promise<void> {
       await reply(msg, '🗑️ Cancelled — nothing was saved.');
       return;
     }
-    // Anything else while a draft is pending is a correction (e.g. "christi", "16/06").
-    await onNote(msg, sender, stripKeyword(body));
+    // A message that looks like expense data (a date, amount, name, pic/wed
+    // label…) is treated as a correction. Anything else is just chatter — stay
+    // silent so the bot doesn't re-post the summary on every message.
+    if (looksLikeCorrection(body)) {
+      await onNote(msg, sender, stripKeyword(body));
+    }
     return;
   }
 
@@ -347,7 +351,6 @@ async function onImage(msg: WAMessage, sender: string): Promise<void> {
 
   const pending = recentPending(sender);
   if (pending && pending.drafts.length === 1) {
-    await reply(msg, '🔎 Reading the receipt…');
     const receipt = await readReceipt(img);
     // If the photo carried a fresh caption, re-parse from it; else keep the
     // existing note and just attach the photo.
@@ -359,7 +362,6 @@ async function onImage(msg: WAMessage, sender: string): Promise<void> {
   const c = getCollecting(sender, msg);
   c.image = img;
   if (caption) c.noteText = c.noteText ? `${c.noteText} ${caption}` : caption;
-  await ack(msg, c);
   schedule(sender);
 }
 
@@ -373,12 +375,15 @@ async function onNote(msg: WAMessage, sender: string, text: string): Promise<voi
       // A full new expense (has its own amount + description) — rebuild from it.
       await finalize(msg, sender, [follow], pending.receipt, pending.imagePath, ['Updated with your note.']);
     } else {
-      // A partial follow-up = a correction (e.g. "0616 christi"). Merge it in.
-      applyCorrection(pending.drafts[0], follow);
-      enrichDraft(pending.drafts[0]);
-      pending.ts = Date.now();
-      persistPending(sender, pending);
-      await reply(msg, renderSummary(pending.drafts));
+      // A partial follow-up = a correction (e.g. "0616 christi"). Merge it in,
+      // but only re-post the summary if something actually changed.
+      const changed = applyCorrection(pending.drafts[0], follow);
+      if (changed) {
+        enrichDraft(pending.drafts[0]);
+        pending.ts = Date.now();
+        persistPending(sender, pending);
+        await reply(msg, renderSummary(pending.drafts));
+      }
     }
     return;
   }
@@ -387,19 +392,30 @@ async function onNote(msg: WAMessage, sender: string, text: string): Promise<voi
   schedule(sender);
 }
 
-/** Overlay corrective fields from a follow-up note onto an existing draft. */
-function applyCorrection(draft: ExpenseDraft, c: WeddingNote): void {
-  if (c.weddingDate) draft.weddingDate = c.weddingDate;
-  if (c.invoiceDate) draft.invoiceDate = c.invoiceDate;
-  if (c.pic) draft.pic = c.pic;
-  if (c.location) draft.location = c.location;
-  if (c.buyer) draft.handler = c.buyer;
-  if (c.description) {
+/** Overlay corrective fields from a follow-up note onto an existing draft.
+ *  Returns true if anything actually changed (so we only re-reply when it did). */
+function applyCorrection(draft: ExpenseDraft, c: WeddingNote): boolean {
+  let changed = false;
+  const set = <T,>(cur: T, next: T): T => {
+    if (next != null && next !== cur) changed = true;
+    return next != null ? next : cur;
+  };
+  draft.weddingDate = set(draft.weddingDate, c.weddingDate);
+  draft.invoiceDate = set(draft.invoiceDate, c.invoiceDate);
+  draft.pic = set(draft.pic, c.pic);
+  draft.location = set(draft.location, c.location);
+  draft.handler = set(draft.handler, c.buyer);
+  if (c.description && c.description !== draft.description) {
     draft.description = c.description;
     recomputeVendorDescription(draft);
+    changed = true;
   }
-  if (c.amount != null) draft.cost = c.amount;
+  if (c.amount != null && c.amount !== draft.cost) {
+    draft.cost = c.amount;
+    changed = true;
+  }
   if (c.weddingDate || c.pic || c.category === 'wedding' || c.isWedding) draft.isWedding = true;
+  return changed;
 }
 
 function recentPending(sender: string): Pending | null {
@@ -419,12 +435,6 @@ function getCollecting(sender: string, msg: WAMessage): Collecting {
     collecting.set(sender, c);
   }
   return c;
-}
-
-async function ack(msg: WAMessage, c: Collecting): Promise<void> {
-  if (c.acked) return;
-  c.acked = true;
-  await reply(msg, '🔎 Reading your expense… one moment.');
 }
 
 function schedule(sender: string): void {
@@ -727,6 +737,16 @@ function looksLikeExpense(text: string): boolean {
   const hasAmount = /\d{1,3}(?:[.,]\d{3})+/.test(text) || /\b\d{4,}\b/.test(text.replace(/[.,\s]/g, ''));
   const hasDate = /\b\d{1,2}\s*[\/\-]\s*\d{1,2}\b/.test(text);
   return hasAmount || hasDate;
+}
+
+/** While a draft is pending, decide whether a message is a correction (act on it)
+ *  or just chatter (ignore, so we don't re-post the summary on every message). */
+function looksLikeCorrection(text: string): boolean {
+  if (looksLikeExpense(text)) return true;
+  if (/\b(pic|wed|general|shop|reimburse)\b/i.test(text)) return true;
+  const tokens = text.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length <= 2) return true; // a bare name / venue / short fix
+  return tokens.some((t) => matchPerson(t)); // mentions a known person
 }
 
 function hasTrigger(body: string): boolean {

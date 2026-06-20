@@ -7,7 +7,7 @@ import { logger } from '../logger.js';
 import { store } from '../db/store.js';
 import { extractReceipts } from '../agents/visionAgent.js';
 import { parseEmployeeNotes, parseEmployeeNote } from '../agents/messageParser.js';
-import { mergeToDraft, recomputeVendorDescription, type ExpenseDraft } from '../expense.js';
+import { mergeToDraft, recomputeVendorDescription, matchPerson, type ExpenseDraft } from '../expense.js';
 import { writeExpense, archiveExpense } from '../notion/expenses.js';
 import { answerQuestion } from '../agents/queryAgent.js';
 import { enrichDraft, missingRequired, displayWeddingDate, displayPic } from '../schedule/enrich.js';
@@ -130,7 +130,7 @@ const INTRO_MESSAGE = [
   '',
   "For weddings I really do need the *wedding date* and the *PIC* — if you skip them I'll try to find them from the schedule, but if you still see *???*, just tell me and then reply *ok*.",
   '',
-  "I'm a bot, so I only jump in when there's a receipt. Chat away, I won't get in the way. Saved one by mistake? Reply */undo*. Other things: */total*, */ask*, */help*.",
+  "I'm a bot, so I only jump in when there's a receipt. Chat away, I won't get in the way. Saved one by mistake? Reply */undo*. Tell me who you are once with */iam <name>* (e.g. _/iam christi_) so I credit your bills correctly. Other things: */total*, */ask*, */help*.",
   '',
   '— — — — —',
   '',
@@ -144,7 +144,7 @@ const INTRO_MESSAGE = [
   '',
   'Untuk wedding saya butuh *tanggal wedding* dan *PIC* — kalau lupa saya coba cari dari schedule, tapi kalau masih *???*, kasih tahu saya lalu balas *ok*.',
   '',
-  'Saya cuma bot, jadi saya muncul kalau ada nota aja. Santai ngobrol, nggak bakal saya ganggu. Salah simpan? Balas */undo*. Lainnya: */total*, */ask*, */help*.',
+  'Saya cuma bot, jadi saya muncul kalau ada nota aja. Santai ngobrol, nggak bakal saya ganggu. Salah simpan? Balas */undo*. Kasih tahu sekali siapa Anda dengan */iam <nama>* (mis. _/iam christi_) biar nota Anda dicatat benar. Lainnya: */total*, */ask*, */help*.',
 ].join('\n');
 
 export function createBot() {
@@ -460,6 +460,26 @@ async function resolveSenderName(msg: WAMessage): Promise<string | null> {
   }
 }
 
+/**
+ * Resolve who posted the bill to a known DADA person. Uses the learned staff map
+ * first (stable across display-name changes), then falls back to matching their
+ * WhatsApp display name — and remembers it when that match succeeds, so the bot
+ * gets better at recognising each colleague over time. Returns the canonical
+ * person if known, else the raw display name for pickHandler to try.
+ */
+async function resolveSenderPerson(msg: WAMessage): Promise<string | null> {
+  const id = msg.author ?? msg.from;
+  const mapped = store.getStaffPerson(id);
+  if (mapped) return mapped;
+  const name = await resolveSenderName(msg);
+  const person = matchPerson(name);
+  if (person) {
+    if (store.setStaffPerson(id, person, 'auto')) logger.info({ id, person }, 'learned sender → person');
+    return person;
+  }
+  return name;
+}
+
 async function finalize(
   msg: WAMessage,
   sender: string,
@@ -468,8 +488,9 @@ async function finalize(
   imagePath: string | null,
   extraWarnings: string[],
 ): Promise<void> {
-  // Whoever posts the bill is usually the handler — resolve their display name.
-  const senderName = await resolveSenderName(msg);
+  // Whoever posts the bill is usually the handler — resolve to a known person
+  // (via the learned staff map, growing as colleagues post).
+  const senderName = await resolveSenderPerson(msg);
   const chatId = msg.from; // the group jid (where to post the auto-save later)
   // The photo (if any) only enriches the first expense in a multi-expense message.
   const drafts = notes.map((n, i) => {
@@ -685,6 +706,16 @@ async function handleCommand(msg: WAMessage, body: string): Promise<void> {
   else if (cmd === 'summary') await reply(msg, buildPeriodSummary(arg === 'month' ? 30 : 7));
   else if (cmd === 'owed') await reply(msg, renderOwed(arg));
   else if (cmd === 'undo') await handleUndo(msg, msg.author ?? msg.from);
+  else if (cmd === 'iam') {
+    const person = matchPerson(arg);
+    const id = msg.author ?? msg.from;
+    if (person) {
+      store.setStaffPerson(id, person, 'manual');
+      await reply(msg, `👍 Got it — I'll treat bills you post as handled by *${person}* (unless your note says otherwise).`);
+    } else {
+      await reply(msg, `Sorry, "${arg}" isn't a name I recognise. Try e.g. */iam christi*, */iam ling*, */iam putri*.`);
+    }
+  }
   else if (cmd === 'pushsummary') {
     const ids = bossIds();
     if (!ids.length) { await reply(msg, 'No boss recipients configured (BOSS_WHATSAPP_ID).'); return; }

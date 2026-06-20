@@ -28,6 +28,17 @@ Today is ${baliTodayISO()} (Bali / WITA time — that is the staff's "now"). All
 in 2026 unless a year is written. Money uses "." or "," as the THOUSANDS separator:
 "82,500" = 82500, "2.115.750" = 2115750, "1,029,665" = 1029665. Output integers.
 
+TWO AMOUNTS in ONE expense (not separate expenses): when a single purchase line has
+two numbers, the "amount" is the INVOICE / grand total — usually the LARGER one. A smaller
+second number is almost always the delivery fee (gosend / grab / ongkir) or a deposit ("DP"):
+do NOT use it as the amount — record it in "notes" instead.
+  • "0617 kyea 6.252.000 300.000 potato head trf ling" → amount 6252000 (invoice total);
+    notes "300.000 likely gosend/ongkir". NOT 300000, NOT 6552000.
+  • "bunga 1.500.000 + ongkir 50.000" → amount 1550000 only if the note clearly means a
+    combined total; otherwise amount 1500000 and note the 50.000 ongkir.
+If a receipt photo is also attached, its printed grand total is the source of truth for the
+amount — the note's numbers are only a cross-check.
+
 DATE FORMAT VARIES BY PERSON: some write month/day ("06/13"), others day/month ("13/06").
 Both mean 13 June. Use the value that yields a valid 2026 date; when ambiguous, prefer the
 near-future or recent date. Output ISO YYYY-MM-DD.

@@ -49,7 +49,7 @@ const PEOPLE_ALIAS: Record<string, string> = {
 };
 
 /** Map a free name (sender display name, "TO X", "by X") to a known person, else null. */
-function matchPerson(name: string | null | undefined): string | null {
+export function matchPerson(name: string | null | undefined): string | null {
   if (!name) return null;
   let up = name.trim().toUpperCase();
   if (!up) return null;

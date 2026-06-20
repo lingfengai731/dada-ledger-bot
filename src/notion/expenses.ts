@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { Client } from '@notionhq/client';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
@@ -115,6 +117,47 @@ function buildProperties(
   return { properties, unmapped };
 }
 
+const CONTENT_TYPES: Record<string, string> = {
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+  '.webp': 'image/webp', '.gif': 'image/gif', '.pdf': 'application/pdf',
+};
+
+/**
+ * Best-effort: upload the receipt photo/PDF and append it to the expense page's
+ * body, so the boss can open a row and see the original receipt. Never throws —
+ * a failed attachment must not stop the expense from being saved.
+ */
+async function attachReceipt(pageId: string, imagePath: string | null): Promise<boolean> {
+  if (!notion || !config.notion.attachReceipts || !imagePath) return false;
+  try {
+    if (!fs.existsSync(imagePath)) return false;
+    const ext = path.extname(imagePath).toLowerCase();
+    const contentType = CONTENT_TYPES[ext] ?? 'application/octet-stream';
+    const filename = path.basename(imagePath);
+    const isPdf = contentType === 'application/pdf';
+
+    // 1) Reserve a file upload, 2) send the bytes, 3) reference it in a block.
+    const upload: any = await (notion as any).fileUploads.create({
+      mode: 'single_part',
+      filename,
+      content_type: contentType,
+    });
+    const data = new Blob([fs.readFileSync(imagePath)], { type: contentType });
+    await (notion as any).fileUploads.send({ file_upload_id: upload.id, file: { filename, data } });
+
+    const ref = { type: 'file_upload', file_upload: { id: upload.id } };
+    const block = isPdf
+      ? { type: 'pdf', pdf: ref }
+      : { type: 'image', image: ref };
+    await (notion as any).blocks.children.append({ block_id: pageId, children: [block] });
+    logger.info({ pageId, filename }, 'receipt attached to Notion page');
+    return true;
+  } catch (err: any) {
+    logger.warn({ err: err?.code ?? err?.message ?? err, pageId }, 'receipt attach failed (row still saved)');
+    return false;
+  }
+}
+
 /** Archive (soft-delete) a previously created Notion row — used by /undo. */
 export async function archiveExpense(pageId: string): Promise<boolean> {
   if (!notion) return false;
@@ -150,6 +193,8 @@ export async function writeExpense(draft: ExpenseDraft): Promise<NotionResult> {
       properties: properties as any,
     });
     logger.info({ pageId: page.id }, 'Notion expense row created');
+    // Best-effort attach the receipt into the page body (never blocks the save).
+    await attachReceipt(page.id, draft.imagePath);
     return { written: true, pageId: page.id, properties, unmapped };
   } catch (err) {
     logger.error({ err }, 'Notion write failed');

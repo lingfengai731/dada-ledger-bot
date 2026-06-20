@@ -58,6 +58,16 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_expenses_wdate ON expenses(wedding_date);
   CREATE INDEX IF NOT EXISTS idx_expenses_pic ON expenses(pic);
 
+  -- Learned mapping from a WhatsApp sender id to a known DADA person, so the bot
+  -- recognises who posted a bill even when their display name is unusual. Grows as
+  -- staff post (auto) or set it themselves with /iam (manual, never auto-overwritten).
+  CREATE TABLE IF NOT EXISTS staff_map (
+    wa_id      TEXT PRIMARY KEY,
+    person     TEXT NOT NULL,
+    source     TEXT NOT NULL DEFAULT 'auto',  -- 'auto' | 'manual'
+    updated_at INTEGER NOT NULL
+  );
+
   -- Drafts awaiting an "ok". Persisted so they survive a restart and so a sweep
   -- can auto-save the ones nobody replied to after a grace period.
   CREATE TABLE IF NOT EXISTS pending_drafts (
@@ -343,6 +353,29 @@ export const store = {
          FROM expenses ${clause} ORDER BY COALESCE(wedding_date, invoice_date) DESC, id DESC LIMIT ${limit}`,
       )
       .all(params);
+  },
+
+  // ---- staff map (sender id → known person) ----
+
+  /** The known person we've learned for a WhatsApp sender id, or null. */
+  getStaffPerson(waId: string): string | null {
+    const row = db.prepare('SELECT person FROM staff_map WHERE wa_id = ?').get(waId) as { person: string } | undefined;
+    return row?.person ?? null;
+  },
+
+  /** Learn/refresh a sender→person mapping. A 'manual' entry (set via /iam) is
+   *  never overwritten by an 'auto' guess. Returns true if it changed. */
+  setStaffPerson(waId: string, person: string, source: 'auto' | 'manual'): boolean {
+    const cur = db.prepare('SELECT person, source FROM staff_map WHERE wa_id = ?').get(waId) as
+      | { person: string; source: string }
+      | undefined;
+    if (cur && cur.source === 'manual' && source === 'auto') return false;
+    if (cur && cur.person === person && cur.source === source) return false;
+    db.prepare(
+      `INSERT INTO staff_map (wa_id, person, source, updated_at) VALUES (@id, @p, @s, @t)
+       ON CONFLICT(wa_id) DO UPDATE SET person=@p, source=@s, updated_at=@t`,
+    ).run({ id: waId, p: person, s: source, t: Date.now() });
+    return true;
   },
 
   // ---- pending drafts (awaiting "ok"; auto-saved after a grace period) ----

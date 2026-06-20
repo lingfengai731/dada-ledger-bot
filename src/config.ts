@@ -25,6 +25,9 @@ export const config = {
     weddingDataSourceId: process.env.NOTION_WEDDING_DATA_SOURCE_ID ?? '',
     /** 'preview' = log the row but DON'T write; 'live' = actually create the Notion row. */
     writeMode: (process.env.NOTION_WRITE ?? 'preview') as 'preview' | 'live',
+    /** Attach the receipt photo/PDF into the created Notion page body (best-effort).
+     *  Off-switch in case the file-upload API misbehaves in production. */
+    attachReceipts: bool(process.env.NOTION_ATTACH_RECEIPTS, true),
     get hasToken(): boolean {
       return Boolean(process.env.NOTION_API_KEY);
     },

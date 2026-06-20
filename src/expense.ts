@@ -103,8 +103,11 @@ export function buildReimbursementDraft(
   const handler = matchPerson(recipientRaw);
   const warnings: string[] = [];
   if (amount == null) warnings.push('Could not read the transfer amount — please check.');
+  // Match the ledger convention: title is just "Reimbursement" with the person in
+  // HANDLER. Only keep the name in the title when it didn't map to a HANDLER option.
+  const title = handler ? 'Reimbursement' : `Reimbursement ${who}`;
   return {
-    vendorDescription: `Reimbursement ${who}`,
+    vendorDescription: title,
     vendor: 'Reimbursement',
     description: who,
     weddingDate: null,

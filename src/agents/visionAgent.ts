@@ -19,7 +19,11 @@ Receipt layout vocabulary (Indonesian):
 CRITICAL number rules:
 - Indonesian uses "." as the THOUSANDS separator. "500.000" means 500000 (five hundred
   thousand), NOT 500. "1.360.000" means 1360000. Always output plain integers in whole Rupiah.
-- If a grand total is written at the bottom, use it. Otherwise sum the line "Jumlah" values.
+- For "total", use the FINAL GRAND TOTAL (the bottom-line "Total" / "Grand Total" /
+  "Jumlah Total" / "Total Due" — usually the largest figure). Do NOT use a deposit, a
+  down-payment ("DP"), a subtotal, tax, or a single line item as the total. On a typed
+  PDF invoice with many rows, the grand total is the summed amount at the very bottom.
+  Only if no grand total is printed, sum the line "Jumlah" values.
 
 IMPORTANT: one photo may contain MULTIPLE separate receipts (often two side by side).
 Return one object per distinct receipt.

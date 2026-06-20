@@ -58,17 +58,41 @@ function matchPerson(name: string | null | undefined): string | null {
 }
 
 /**
- * Handler = who paid / submitted. Priority: the message sender (whoever posts
- * the bill in the group is usually the handler), then the invoice's "TO X"
- * recipient, then a "by/tf/trf X" name in the note. Falls back to the raw note
- * buyer so nothing is silently dropped.
+ * Handler = who paid / should be reimbursed. No single signal is 100% reliable,
+ * so we weigh three: the invoice "TO X" recipient, a "by/tf/trf X" name in the
+ * note, and the message sender (whoever posted the bill). Each known person gets
+ * a weighted vote; the top scorer wins. When signals disagree we return a note
+ * so the human can confirm. Falls back to the raw buyer so nothing is dropped.
  */
-function pickHandler(senderName: string | null, recipient: string | null, buyer: string | null): string | null {
-  for (const cand of [senderName, recipient, buyer]) {
-    const m = matchPerson(cand);
-    if (m) return m;
+function pickHandler(
+  senderName: string | null,
+  recipient: string | null,
+  buyer: string | null,
+): { handler: string | null; conflict: string | null } {
+  const signals: { who: string; w: number; src: string }[] = [];
+  const add = (raw: string | null, w: number, src: string) => {
+    const m = matchPerson(raw);
+    if (m) signals.push({ who: m, w, src });
+  };
+  add(recipient, 1.2, 'invoice TO'); // most objective
+  add(buyer, 1.0, 'note');           // staff's explicit payer
+  add(senderName, 0.9, 'sender');    // who posted it
+
+  if (!signals.length) return { handler: buyer ?? recipient ?? null, conflict: null };
+
+  const score: Record<string, number> = {};
+  const srcs: Record<string, string[]> = {};
+  for (const s of signals) {
+    score[s.who] = (score[s.who] ?? 0) + s.w;
+    (srcs[s.who] ??= []).push(s.src);
   }
-  return buyer ?? recipient ?? null;
+  const ranked = Object.keys(score).sort((a, b) => score[b] - score[a]);
+  const handler = ranked[0];
+  const others = ranked.slice(1);
+  const conflict = others.length
+    ? `Handler set to ${handler} (${srcs[handler].join(' + ')}); also saw ${others.join(', ')} — reply to change if wrong.`
+    : null;
+  return { handler, conflict };
 }
 
 /** Combine vendor + description into the title, de-duped; null if both empty. */
@@ -118,6 +142,9 @@ export function mergeToDraft(
     warnings.push('The photo was hard to read clearly — please check the amount, or resend a sharper photo.');
   }
 
+  const { handler, conflict } = pickHandler(senderName, receipt?.recipient ?? null, note.buyer);
+  if (conflict) warnings.push(conflict);
+
   return {
     vendorDescription,
     vendor,
@@ -126,7 +153,7 @@ export function mergeToDraft(
     invoiceDate: note.invoiceDate ?? receipt?.date ?? null,
     cost,
     pic: note.pic,
-    handler: pickHandler(senderName, receipt?.recipient ?? null, note.buyer),
+    handler,
     location: note.location,
     isWedding,
     confidence: Math.min(note.confidence, receipt?.confidence ?? 1),

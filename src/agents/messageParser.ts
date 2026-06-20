@@ -35,8 +35,9 @@ PREFERRED LABELED FORMAT (staff are being trained to write notes like this):
 - "pic <name>" / "PIC <name>" EXPLICITLY marks the wedding person-in-charge → pic (normalize the name).
 - These labels are AUTHORITATIVE: whenever "wed"/"pic" appear, use them and do NOT second-guess
   from position. A "pic <name>" is the pic, never the buyer.
-- The invoice date is OPTIONAL — if the note omits it, leave invoiceDate null; it will be filled
-  from the receipt photo. Never invent an invoice date.
+- The invoice date is OPTIONAL and usually OMITTED — it is read from the receipt photo. Leave
+  invoiceDate null unless the staff explicitly typed one. Staff may force it with "inv dd/mm"
+  (a workaround when the photo's date is unreadable) — only then set invoiceDate. Never invent one.
 
 TWO AMOUNTS in ONE expense (not separate expenses): when a single purchase line has
 two numbers, the "amount" is the INVOICE / grand total — usually the LARGER one. A smaller

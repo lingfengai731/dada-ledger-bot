@@ -239,7 +239,10 @@ export function mergeToDraft(
     description,
     weddingDate: isWedding ? note.weddingDate : null,
     weddingEnd: null,
-    invoiceDate: note.invoiceDate ?? receipt?.date ?? null,
+    // Boss: prioritise the date printed on the receipt; fall back to what staff
+    // typed (e.g. the "inv dd/mm" workaround) only when the photo has none. Blank
+    // is fine — staff can add it in a correction; it never blocks saving.
+    invoiceDate: receipt?.date ?? note.invoiceDate ?? null,
     cost,
     reimbursed: null,
     isReimbursement: false,

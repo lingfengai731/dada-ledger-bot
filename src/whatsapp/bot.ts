@@ -7,7 +7,7 @@ import { logger } from '../logger.js';
 import { store } from '../db/store.js';
 import { extractReceipts } from '../agents/visionAgent.js';
 import { parseEmployeeNotes, parseEmployeeNote } from '../agents/messageParser.js';
-import { mergeToDraft, type ExpenseDraft } from '../expense.js';
+import { mergeToDraft, recomputeVendorDescription, type ExpenseDraft } from '../expense.js';
 import { writeExpense, archiveExpense } from '../notion/expenses.js';
 import { answerQuestion } from '../agents/queryAgent.js';
 import { enrichDraft, missingRequired, displayWeddingDate, displayPic } from '../schedule/enrich.js';
@@ -316,7 +316,10 @@ function applyCorrection(draft: ExpenseDraft, c: WeddingNote): void {
   if (c.pic) draft.pic = c.pic;
   if (c.location) draft.location = c.location;
   if (c.buyer) draft.handler = c.buyer;
-  if (c.description) draft.vendorDescription = c.description;
+  if (c.description) {
+    draft.description = c.description;
+    recomputeVendorDescription(draft);
+  }
   if (c.amount != null) draft.cost = c.amount;
   if (c.weddingDate || c.pic || c.category === 'wedding' || c.isWedding) draft.isWedding = true;
 }
@@ -387,6 +390,16 @@ async function buildFromCollection(
   await finalize(msg, sender, notes, receipt, img?.imagePath ?? null, extra);
 }
 
+/** The sender's WhatsApp display name (used to infer the handler in the real group). */
+async function resolveSenderName(msg: WAMessage): Promise<string | null> {
+  try {
+    const c = await msg.getContact();
+    return (c?.pushname || (c as any)?.name || c?.shortName || null) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function finalize(
   msg: WAMessage,
   sender: string,
@@ -395,9 +408,11 @@ async function finalize(
   imagePath: string | null,
   extraWarnings: string[],
 ): Promise<void> {
+  // Whoever posts the bill is usually the handler — resolve their display name.
+  const senderName = await resolveSenderName(msg);
   // The photo (if any) only enriches the first expense in a multi-expense message.
   const drafts = notes.map((n, i) => {
-    const d = mergeToDraft(n, i === 0 ? receipt : null, i === 0 ? imagePath : null);
+    const d = mergeToDraft(n, i === 0 ? receipt : null, i === 0 ? imagePath : null, senderName);
     if (i === 0) d.warnings.push(...extraWarnings);
     // Fill missing wedding date / PIC from the schedule + recent context.
     enrichDraft(d);
@@ -479,7 +494,7 @@ function renderSummary(drafts: ExpenseDraft[]): string {
     total += d.cost ?? 0;
     const inv = d.invoiceDate ? `inv ${d.invoiceDate}` : 'inv —';
     const tag = d.isWedding ? `${inv} · wed ${displayWeddingDate(d)} · ${displayPic(d)}` : `${inv} · non-wedding`;
-    lines.push(`*${i + 1}.* ${d.vendorDescription ?? '—'} — ${formatMoney(d.cost)} _(${tag})_`);
+    lines.push(`*${i + 1}.* ${d.vendorDescription ?? '???'} — ${formatMoney(d.cost)} _(${tag})_`);
   });
   lines.push('', `*TOTAL: ${formatMoney(total)} ${config.currency}*`);
   const fills = drafts.flatMap((d) => d.info);
@@ -498,7 +513,7 @@ function renderSummary(drafts: ExpenseDraft[]): string {
 
 function renderOne(draft: ExpenseDraft): string {
   const lines: string[] = ['🧾 *Please confirm this expense:*', ''];
-  lines.push(`*Vendor / description:* ${draft.vendorDescription ?? '—'}`);
+  lines.push(`*Vendor / description:* ${draft.vendorDescription ?? '???'}`);
   lines.push(`*Cost:* ${formatMoney(draft.cost)} ${config.currency}`);
   // Invoice date (when the receipt was issued) is always shown.
   lines.push(`*Invoice date:* ${draft.invoiceDate ?? '—'}`);

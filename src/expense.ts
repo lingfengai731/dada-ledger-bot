@@ -6,8 +6,12 @@ import type { Receipt, WeddingNote } from './types.js';
  * wrote in the accompanying note.
  */
 export interface ExpenseDraft {
-  /** Notion title column "VENDOR / DESCRIPTION". */
+  /** Notion title "VENDOR / DESCRIPTION" — computed = vendor + description, comma-joined. */
   vendorDescription: string | null;
+  /** Who issued the invoice (from the receipt/PDF). */
+  vendor: string | null;
+  /** What it's for / the item (from the staff note). */
+  description: string | null;
   /** "WEDDING DATE" (ISO) — null for non-wedding expenses. */
   weddingDate: string | null;
   /** "INVOICE DATE" (ISO) — from the receipt. */
@@ -16,7 +20,7 @@ export interface ExpenseDraft {
   cost: number | null;
   /** Raw PIC name from the note (mapped to a Notion option at write time). */
   pic: string | null;
-  /** Raw HANDLER / buyer name ("by X"), mapped at write time. */
+  /** Raw HANDLER / payer name, mapped at write time. */
   handler: string | null;
   /** Venue / location from the note (used to match the wedding schedule). Not written to Notion. */
   location: string | null;
@@ -32,27 +36,72 @@ export interface ExpenseDraft {
   rawNote: string;
 }
 
+// Known DADA people, for matching a message sender / invoice recipient to a handler.
+const KNOWN_PEOPLE = [
+  'LING', 'JAY', 'CHRISTI', 'PUTRI', 'GENERAL', 'RANIA', 'HIRA', 'MINGGU',
+  'PUTU', 'MADE', 'JESICHA', 'JESSICA', 'HAMZAH', 'KENT',
+];
+const PEOPLE_ALIAS: Record<string, string> = {
+  CHRISTY: 'CHRISTI', CHRISTIE: 'CHRISTI', ANDRIAN: 'CHRISTI',
+  JESICCA: 'JESICHA', JESSICHA: 'JESICHA',
+};
+
+/** Map a free name (sender display name, "TO X", "by X") to a known person, else null. */
+function matchPerson(name: string | null | undefined): string | null {
+  if (!name) return null;
+  let up = name.trim().toUpperCase();
+  if (!up) return null;
+  up = PEOPLE_ALIAS[up] ?? up;
+  return (
+    KNOWN_PEOPLE.find((k) => k === up || up.startsWith(k) || k.startsWith(up) || up.includes(k)) ?? null
+  );
+}
+
+/**
+ * Handler = who paid / submitted. Priority: the message sender (whoever posts
+ * the bill in the group is usually the handler), then the invoice's "TO X"
+ * recipient, then a "by/tf/trf X" name in the note. Falls back to the raw note
+ * buyer so nothing is silently dropped.
+ */
+function pickHandler(senderName: string | null, recipient: string | null, buyer: string | null): string | null {
+  for (const cand of [senderName, recipient, buyer]) {
+    const m = matchPerson(cand);
+    if (m) return m;
+  }
+  return buyer ?? recipient ?? null;
+}
+
+/** Combine vendor + description into the title, de-duped; null if both empty. */
+export function combineVendorDescription(vendor: string | null, description: string | null): string | null {
+  const parts: string[] = [];
+  for (const x of [vendor, description]) {
+    const t = (x ?? '').trim();
+    if (t && !parts.some((p) => p.toLowerCase() === t.toLowerCase())) parts.push(t);
+  }
+  return parts.length ? parts.join(', ') : null;
+}
+
+/** Recompute the combined title after vendor/description change (e.g. a correction). */
+export function recomputeVendorDescription(draft: ExpenseDraft): void {
+  draft.vendorDescription = combineVendorDescription(draft.vendor, draft.description);
+}
+
 export function mergeToDraft(
   note: WeddingNote,
   receipt: Receipt | null,
   imagePath: string | null,
+  senderName: string | null = null,
 ): ExpenseDraft {
   const warnings: string[] = [];
 
-  const vendorDescription =
-    note.description ??
-    receipt?.vendor ??
-    receipt?.items?.[0]?.name ??
-    null;
+  const vendor = receipt?.vendor ?? null;
+  const description = note.description ?? receipt?.items?.[0]?.name ?? null;
+  const vendorDescription = combineVendorDescription(vendor, description);
 
   // Prefer the printed receipt total; fall back to the amount typed in the note.
   let cost: number | null = receipt?.total ?? null;
   if (cost === null) cost = note.amount;
-  if (
-    receipt?.total != null &&
-    note.amount != null &&
-    receipt.total !== note.amount
-  ) {
+  if (receipt?.total != null && note.amount != null && receipt.total !== note.amount) {
     warnings.push(
       `Receipt total (${receipt.total}) ≠ amount in note (${note.amount}) — using receipt total.`,
     );
@@ -62,25 +111,22 @@ export function mergeToDraft(
   if (isWedding && !note.weddingDate) warnings.push('Wedding expense but no wedding date detected.');
   if (cost === null) warnings.push('No amount detected on the receipt or in the note.');
   if (!vendorDescription) warnings.push('No vendor/description detected.');
-  // Amount sanity: a cost under 1.000 IDR is almost always a dropped thousands
-  // separator (e.g. "500" should be "500.000"). Flag it for a double-check.
   if (cost != null && cost > 0 && cost < 1000) {
     warnings.push(`Amount looks very low (${cost}) — a thousands separator may be missing (e.g. ${cost} vs ${cost}.000). Please double-check.`);
   }
-  // Blurry photo: the receipt was read but the model wasn't confident. Ask for a
-  // clearer photo rather than trusting a shaky read.
   if (receipt && typeof receipt.confidence === 'number' && receipt.confidence < 0.55) {
     warnings.push('The photo was hard to read clearly — please check the amount, or resend a sharper photo.');
   }
 
   return {
     vendorDescription,
+    vendor,
+    description,
     weddingDate: isWedding ? note.weddingDate : null,
-    // The note's first date is the invoice date; fall back to the receipt's printed date.
     invoiceDate: note.invoiceDate ?? receipt?.date ?? null,
     cost,
     pic: note.pic,
-    handler: note.buyer,
+    handler: pickHandler(senderName, receipt?.recipient ?? null, note.buyer),
     location: note.location,
     isWedding,
     confidence: Math.min(note.confidence, receipt?.confidence ?? 1),

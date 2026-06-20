@@ -77,6 +77,8 @@ PIC vs BUYER (two different people):
     • christy / christie / christi / andrian → CHRISTI
     • putri / radityasari → PUTRI
   May be absent — that's fine. Use GENERAL for non-wedding/studio/office.
+  IMPORTANT: a name in a "by/tf/trf <name>" phrase is the BUYER/handler, NOT the pic —
+  never set pic from it. (e.g. "trf ling" → buyer "ling", pic stays null.)
 - buyer = who PAID for it (to be reimbursed) = the HANDLER. Appears near "by <name>", "tf <name>",
   "<name> TRF/trf", or as a trailing name (putu, Minggu, putri, rania…). "TRF"/"tf" = bank transfer.
 

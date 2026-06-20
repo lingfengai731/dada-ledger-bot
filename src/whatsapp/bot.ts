@@ -331,16 +331,25 @@ async function onImage(msg: WAMessage, sender: string): Promise<void> {
   fs.writeFileSync(imagePath, Buffer.from(media.data, 'base64'));
   const img: BufferedImage = { ts: Date.now(), mimetype: media.mimetype, data: media.data, imagePath };
 
+  // Staff usually post the photo WITH a caption ("0617 kyea ... trf ling"). That
+  // caption is the note — capture it, or it's silently lost and the expense is
+  // read from the image alone (wrong category/PIC/description).
+  const caption = (msg.body ?? '').trim();
+
   const pending = recentPending(sender);
   if (pending && pending.drafts.length === 1) {
     await reply(msg, '🔎 Reading the receipt…');
     const receipt = await readReceipt(img);
-    await finalize(msg, sender, pending.notes, receipt, imagePath, ['Updated with the photo.']);
+    // If the photo carried a fresh caption, re-parse from it; else keep the
+    // existing note and just attach the photo.
+    const notes = caption ? await parseEmployeeNotes(caption) : pending.notes;
+    await finalize(msg, sender, notes, receipt, imagePath, ['Updated with the photo.']);
     return;
   }
 
   const c = getCollecting(sender, msg);
   c.image = img;
+  if (caption) c.noteText = c.noteText ? `${c.noteText} ${caption}` : caption;
   await ack(msg, c);
   schedule(sender);
 }

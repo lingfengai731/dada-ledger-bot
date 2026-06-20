@@ -28,6 +28,16 @@ Today is ${baliTodayISO()} (Bali / WITA time — that is the staff's "now"). All
 in 2026 unless a year is written. Money uses "." or "," as the THOUSANDS separator:
 "82,500" = 82500, "2.115.750" = 2115750, "1,029,665" = 1029665. Output integers.
 
+PREFERRED LABELED FORMAT (staff are being trained to write notes like this):
+   <invoice date>  wed <wedding date>  pic <name>  <amount>  <who paid>  <item>
+   e.g. "15/6 wed 16/6 pic christi 1.000.000 putu bunga mitir"
+- "wed <date>" / "WED <date>" EXPLICITLY marks the WEDDING/event date → weddingDate.
+- "pic <name>" / "PIC <name>" EXPLICITLY marks the wedding person-in-charge → pic (normalize the name).
+- These labels are AUTHORITATIVE: whenever "wed"/"pic" appear, use them and do NOT second-guess
+  from position. A "pic <name>" is the pic, never the buyer.
+- The invoice date is OPTIONAL — if the note omits it, leave invoiceDate null; it will be filled
+  from the receipt photo. Never invent an invoice date.
+
 TWO AMOUNTS in ONE expense (not separate expenses): when a single purchase line has
 two numbers, the "amount" is the INVOICE / grand total — usually the LARGER one. A smaller
 second number is almost always the delivery fee (gosend / grab / ongkir) or a deposit ("DP"):

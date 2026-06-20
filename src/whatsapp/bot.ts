@@ -45,6 +45,8 @@ interface Pending {
   chatId: string;
   /** true once the 30-min "please confirm" nudge has been sent (don't repeat). */
   nudged30?: boolean;
+  /** id of the bot's confirm-summary message, so the nudge can quote-reply it. */
+  summaryMsgId?: string;
 }
 
 // A draft nobody replied "ok" to is auto-saved after this long (boss's rule:
@@ -406,7 +408,8 @@ async function onNote(msg: WAMessage, sender: string, text: string): Promise<voi
         enrichDraft(pending.drafts[0]);
         pending.ts = Date.now();
         persistPending(sender, pending);
-        await reply(msg, renderSummary(pending.drafts));
+        const sent = await reply(msg, renderSummary(pending.drafts));
+        if (sent) { pending.summaryMsgId = sent.id._serialized; persistPending(sender, pending); }
       }
     }
     return;
@@ -542,8 +545,10 @@ async function buildReimbursement(
   if (!transfers.length) drafts[0].warnings.push('Could not read any transfer in the screenshot — please check.');
 
   const chatId = msg.from;
-  persistPending(sender, { drafts, notes: [], receipt: null, imagePath: img.imagePath, ts: Date.now(), waMessageId: msg.id._serialized, chatId });
-  await reply(msg, renderSummary(drafts));
+  const pending: Pending = { drafts, notes: [], receipt: null, imagePath: img.imagePath, ts: Date.now(), waMessageId: msg.id._serialized, chatId };
+  persistPending(sender, pending);
+  const sent = await reply(msg, renderSummary(drafts));
+  if (sent) { pending.summaryMsgId = sent.id._serialized; persistPending(sender, pending); }
 }
 
 /** The sender's WhatsApp display name (used to infer the handler in the real group). */
@@ -606,8 +611,10 @@ async function finalize(
     }
     return d;
   });
-  persistPending(sender, { drafts, notes, receipt, imagePath, ts: Date.now(), waMessageId: msg.id._serialized, chatId });
-  await reply(msg, renderSummary(drafts));
+  const pending: Pending = { drafts, notes, receipt, imagePath, ts: Date.now(), waMessageId: msg.id._serialized, chatId };
+  persistPending(sender, pending);
+  const sent = await reply(msg, renderSummary(drafts));
+  if (sent) { pending.summaryMsgId = sent.id._serialized; persistPending(sender, pending); }
 }
 
 async function commit(msg: WAMessage, sender: string): Promise<void> {
@@ -743,7 +750,11 @@ async function sendNudge(sender: string, chatId: string, pending: Pending): Prom
   const text = missing.length
     ? `⏰ @${number} I still need the *${missing.join('* & *')}* for *${what}* before I can save it. Reply with it, then *ok*.`
     : `⏰ @${number} please confirm *${what}* — reply *ok* to save, or send a correction.`;
-  await sendToChat(chatId, text, '[nudge preview]', { mentions: [sender] });
+  // Quote the original confirm message so staff can tap to jump back to it.
+  const opts: { mentions: string[]; quotedMessageId?: string } = { mentions: [sender] };
+  const quote = pending.summaryMsgId ?? pending.waMessageId;
+  if (quote) opts.quotedMessageId = quote;
+  await sendToChat(chatId, text, '[nudge preview]', opts);
 }
 
 function renderSummary(drafts: ExpenseDraft[]): string {
@@ -899,7 +910,10 @@ function renderOwed(handler: string): string {
   return lines.join('\n');
 }
 
-async function reply(msg: WAMessage, text: string): Promise<void> {
-  if (config.dryRun) logger.info('\n[reply preview]\n' + text);
-  else await msg.reply(text);
+async function reply(msg: WAMessage, text: string): Promise<WAMessage | null> {
+  if (config.dryRun) {
+    logger.info('\n[reply preview]\n' + text);
+    return null;
+  }
+  return await msg.reply(text);
 }

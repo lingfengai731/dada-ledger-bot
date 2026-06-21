@@ -34,6 +34,10 @@ const CANCEL_WORDS = new Set(['cancel', 'no', 'nope', 'batal', 'skip']);
 interface BufferedImage { ts: number; mimetype: string; data: string; imagePath: string; }
 interface Collecting { image?: BufferedImage; noteText?: string; firstMsg: WAMessage; acked: boolean; timer: NodeJS.Timeout | null; }
 interface Pending {
+  /** Unique id (the triggering message id). Each submission is its OWN pending. */
+  id: string;
+  /** Who posted it — a sender may have several independent pendings at once. */
+  sender: string;
   drafts: ExpenseDraft[];
   notes: WeddingNote[];
   receipt: Receipt | null;
@@ -57,17 +61,19 @@ const NUDGE_MS = 30 * 60 * 1000;
 const SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 
 const collecting = new Map<string, Collecting>();
+/** Open pendings keyed by their own id (NOT by sender) so one person can have
+ *  several at once — each shown, confirmed, nudged and saved on its own. */
 const pendingDrafts = new Map<string, Pending>();
 let waClient: pkg.Client | null = null;
 let pendingRestored = false;
 
-/** Save/replace a sender's open draft to the DB so it survives a restart and
- *  the auto-write sweep can find it. Keeps the in-memory map authoritative. */
-function persistPending(sender: string, p: Pending): void {
-  pendingDrafts.set(sender, p);
+/** Save one pending to memory + DB so it survives a restart and the sweep finds it. */
+function persistPending(p: Pending): void {
+  pendingDrafts.set(p.id, p);
   try {
     store.upsertPending({
-      sender,
+      id: p.id,
+      sender: p.sender,
       chatId: p.chatId,
       waMessageId: p.waMessageId,
       payloadJson: JSON.stringify(p),
@@ -78,27 +84,38 @@ function persistPending(sender: string, p: Pending): void {
   }
 }
 
-/** Drop a sender's open draft from both memory and the DB. */
-function clearPending(sender: string): void {
-  pendingDrafts.delete(sender);
+/** Drop one pending from both memory and the DB. */
+function clearPending(p: Pending): void {
+  pendingDrafts.delete(p.id);
   try {
-    store.deletePending(sender);
+    store.deletePending(p.id);
   } catch (err) {
     logger.error({ err }, 'failed to clear pending draft');
   }
 }
 
-/** Re-load drafts left open before a restart so "ok" still works. Runs once. */
+/** Every open pending a sender has, newest last. */
+function pendingsForSender(sender: string): Pending[] {
+  return [...pendingDrafts.values()].filter((p) => p.sender === sender).sort((a, b) => a.ts - b.ts);
+}
+
+/** The sender's most-recently-shown pending (the default target for a correction). */
+function currentPending(sender: string): Pending | null {
+  const all = pendingsForSender(sender);
+  return all.length ? all[all.length - 1] : null;
+}
+
+/** Re-load pendings left open before a restart so "ok" still works. Runs once. */
 function restorePending(): void {
   if (pendingRestored) return;
   pendingRestored = true;
   let n = 0;
   for (const row of store.allPending()) {
     try {
-      pendingDrafts.set(row.sender, JSON.parse(row.payload_json) as Pending);
+      pendingDrafts.set(row.id, JSON.parse(row.payload_json) as Pending);
       n++;
     } catch {
-      store.deletePending(row.sender);
+      store.deletePending(row.id);
     }
   }
   if (n) logger.info({ count: n }, 'restored pending drafts from DB');
@@ -346,46 +363,53 @@ async function handleMessage(msg: WAMessage): Promise<void> {
     return;
   }
 
+  // Resolve a quoted message once (used for both "note quoting a photo" and
+  // "ok/correction quoting a specific confirm message").
+  let quoted: WAMessage | null = null;
+  if (msg.hasQuotedMsg) {
+    try { quoted = await msg.getQuotedMessage(); } catch (err) { logger.warn({ err }, 'could not load quoted message'); }
+  }
+
   // Scenario 3: a note that QUOTES an earlier photo is the note FOR that photo —
   // pair them into one expense instead of recording the text on its own.
-  if (msg.hasQuotedMsg) {
-    try {
-      const q = await msg.getQuotedMessage();
-      if (q && !q.fromMe && q.hasMedia && (q.type === 'image' || q.type === 'document')) {
-        await onQuotedImageNote(msg, sender, q, body);
-        return;
-      }
-    } catch (err) {
-      logger.warn({ err }, 'could not load quoted message');
-    }
+  if (quoted && !quoted.fromMe && quoted.hasMedia && (quoted.type === 'image' || quoted.type === 'document')) {
+    await onQuotedImageNote(msg, sender, quoted, body);
+    return;
   }
 
   const word = body.toLowerCase().replace(/[^a-z]/g, '');
-  const pending = currentPending(sender);
-  if (pending) {
+  const pendings = pendingsForSender(sender);
+  if (pendings.length) {
+    // Quoting one of my confirm messages targets THAT pending; otherwise the latest.
+    const quotedId = quoted?.id?._serialized ?? null;
+    const targeted = quotedId ? pendings.find((p) => p.summaryMsgId === quotedId || p.waMessageId === quotedId) ?? null : null;
+    const target = targeted ?? pendings[pendings.length - 1];
+
     if (CONFIRM_WORDS.has(word) || body.includes('✅')) {
-      await commit(msg, sender);
+      // A plain "ok" confirms everything still open; a quoted "ok" just that one.
+      await commitPendings(msg, targeted ? [targeted] : pendings);
       return;
     }
     if (CANCEL_WORDS.has(word)) {
-      clearPending(sender);
-      await reply(msg, '🗑️ Cancelled — nothing was saved.');
+      const toCancel = targeted ? [targeted] : pendings;
+      for (const p of toCancel) clearPending(p);
+      await reply(msg, toCancel.length > 1 ? `🗑️ Cancelled ${toCancel.length} pending expenses.` : '🗑️ Cancelled — nothing was saved.');
       return;
     }
-    // "1. 130000" / "3. christi" → fix specific row(s) of the running set.
-    if (parseTargetedLines(body, pending.drafts.length).length) {
-      await correctRows(msg, sender, pending, body);
+    // "1. 130000" / "3. christi" → fix specific row(s) of the targeted set.
+    if (parseTargetedLines(body, target.drafts.length).length) {
+      await correctRows(msg, target, body);
       return;
     }
-    // A message carrying its OWN amount/date is a NEW expense → collect it and
-    // ADD it to the running set (never overwrite it, never mistake it for a fix).
+    // A message carrying its OWN amount/date is a NEW, separate expense → its own
+    // confirmation (never merged into the one already showing).
     if (looksLikeExpense(body)) {
       await onNote(msg, sender, stripKeyword(body));
       return;
     }
     // Otherwise a bare partial fix ("christi", "wed 16/6") → fill the blanks.
     if (looksLikeCorrection(body)) {
-      await correctBare(msg, sender, pending, stripKeyword(body));
+      await correctBare(msg, target, stripKeyword(body));
     }
     return;
   }
@@ -444,7 +468,7 @@ async function onImage(msg: WAMessage, sender: string): Promise<void> {
     const note = pending.notes[0] ?? EMPTY_NOTE;
     pending.drafts[0] = mergeToDraft(note, receipt, imagePath, pending.drafts[0].handler);
     enrichDraft(pending.drafts[0]);
-    await reReply(msg, sender, pending);
+    await reReply(msg, pending);
     return;
   }
 
@@ -467,15 +491,16 @@ async function onQuotedImageNote(msg: WAMessage, sender: string, quoted: WAMessa
   }
 
   const key = mediaKey(quoted.id._serialized);
-  const pending = currentPending(sender);
-  const draft = pending?.drafts.find((d) => d.imagePath?.includes(key));
-  if (pending && draft) {
-    const follow = await parseEmployeeNote(note);
-    if (applyCorrection(draft, follow)) {
-      enrichDraft(draft);
-      await reReply(msg, sender, pending);
+  for (const p of pendingsForSender(sender)) {
+    const draft = p.drafts.find((d) => d.imagePath?.includes(key));
+    if (draft) {
+      const follow = await parseEmployeeNote(note);
+      if (applyCorrection(draft, follow)) {
+        enrichDraft(draft);
+        await reReply(msg, p);
+      }
+      return;
     }
-    return;
   }
 
   const img = await bufferMedia(quoted);
@@ -495,12 +520,12 @@ async function onNote(msg: WAMessage, sender: string, text: string): Promise<voi
   schedule(sender);
 }
 
-/** Persist the (mutated) pending batch and re-post the summary. */
-async function reReply(msg: WAMessage, sender: string, pending: Pending): Promise<void> {
+/** Persist the (mutated) pending and re-post its summary. */
+async function reReply(msg: WAMessage, pending: Pending): Promise<void> {
   pending.ts = Date.now();
-  persistPending(sender, pending);
+  persistPending(pending);
   const sent = await reply(msg, renderSummary(pending.drafts));
-  if (sent) { pending.summaryMsgId = sent.id._serialized; persistPending(sender, pending); }
+  if (sent) { pending.summaryMsgId = sent.id._serialized; persistPending(pending); }
 }
 
 /** Pull "N. <fix>" lines out of a correction to a multi-expense batch. Matches
@@ -523,21 +548,21 @@ function parseTargetedLines(text: string, count: number): { idx: number; rest: s
 }
 
 /** Numbered fixes ("1. 130000", "3. christi") → patch just those row(s). */
-async function correctRows(msg: WAMessage, sender: string, pending: Pending, text: string): Promise<void> {
+async function correctRows(msg: WAMessage, pending: Pending, text: string): Promise<void> {
   const targeted = parseTargetedLines(text, pending.drafts.length);
   let any = false;
   for (const { idx, rest } of targeted) {
     const follow = await parseEmployeeNote(rest);
     if (applyCorrection(pending.drafts[idx], follow)) { enrichDraft(pending.drafts[idx]); any = true; }
   }
-  if (any) await reReply(msg, sender, pending);
+  if (any) await reReply(msg, pending);
   else await reply(msg, '👍 Nothing changed there — reply *ok* to save, or e.g. *1. 130000*.');
 }
 
 /** A bare partial fix ("christi", "wed 16/6") with no row number. Fill it into
  *  every row that's MISSING that field (e.g. one "christi" sets PIC for all the
  *  rows still lacking one). For a single pending row, also allow overriding. */
-async function correctBare(msg: WAMessage, sender: string, pending: Pending, text: string): Promise<void> {
+async function correctBare(msg: WAMessage, pending: Pending, text: string): Promise<void> {
   const follow = await parseEmployeeNote(text);
   let any = false;
   for (const d of pending.drafts) {
@@ -546,9 +571,9 @@ async function correctBare(msg: WAMessage, sender: string, pending: Pending, tex
   if (!any && pending.drafts.length === 1) {
     if (applyCorrection(pending.drafts[0], follow)) { enrichDraft(pending.drafts[0]); any = true; }
   }
-  if (any) await reReply(msg, sender, pending);
+  if (any) await reReply(msg, pending);
   else if (pending.drafts.length > 1) {
-    await reply(msg, `You have *${pending.drafts.length}* expenses pending — which one? Reply with its number, e.g. *1. ${text}*.`);
+    await reply(msg, `That set has *${pending.drafts.length}* expenses — which one? Reply with its number, e.g. *1. ${text}*.`);
   }
 }
 
@@ -593,13 +618,6 @@ function applyCorrection(draft: ExpenseDraft, c: WeddingNote): boolean {
   }
   if (c.weddingDate || c.pic || c.category === 'wedding' || c.isWedding) draft.isWedding = true;
   return changed;
-}
-
-/** The sender's open (unconfirmed) expense set, if any. One per sender: new
- *  submissions ACCUMULATE into it until they reply ok/cancel or it auto-saves,
- *  so nothing a person posts is lost or left unnudged. */
-function currentPending(sender: string): Pending | null {
-  return pendingDrafts.get(sender) ?? null;
 }
 
 function getCollecting(sender: string, msg: WAMessage): Collecting {
@@ -691,7 +709,7 @@ async function buildReimbursement(
     : [buildReimbursementDraft(typedName, null, img.imagePath, noteText)];
   if (!transfers.length) drafts[0].warnings.push('Could not read any transfer in the screenshot — please check.');
 
-  await addAndShow(msg, sender, drafts, [], null, img.imagePath);
+  await showNewPending(msg, sender, drafts, [], null, img.imagePath);
 }
 
 /** The sender's WhatsApp display name (used to infer the handler in the real group). */
@@ -767,13 +785,13 @@ async function finalize(
     }
     return d;
   });
-  await addAndShow(msg, sender, drafts, notes, receipt, imagePath);
+  await showNewPending(msg, sender, drafts, notes, receipt, imagePath);
 }
 
-/** Show a freshly-built set of drafts: ADD them to the sender's running pending if
- *  one is open (so separate submissions don't overwrite each other), else start a
- *  new one. Re-posts the (combined) confirm summary and tracks its message id. */
-async function addAndShow(
+/** Show a freshly-built submission as its OWN independent pending (one message →
+ *  one confirmation). Separate submissions are never merged, so each is confirmed,
+ *  nudged and saved on its own. */
+async function showNewPending(
   msg: WAMessage,
   sender: string,
   drafts: ExpenseDraft[],
@@ -781,49 +799,54 @@ async function addAndShow(
   receipt: Receipt | null,
   imagePath: string | null,
 ): Promise<void> {
-  const existing = pendingDrafts.get(sender);
-  const pending: Pending = existing ?? {
-    drafts: [], notes: [], receipt, imagePath, ts: Date.now(), waMessageId: msg.id._serialized, chatId: msg.from,
+  const pending: Pending = {
+    id: msg.id._serialized, sender, drafts, notes, receipt, imagePath,
+    ts: Date.now(), waMessageId: msg.id._serialized, chatId: msg.from,
   };
-  pending.drafts.push(...drafts);
-  pending.notes.push(...notes);
-  pending.ts = Date.now();
-  pending.nudged30 = false; // new activity → restart the reminder/auto-save clock
-  persistPending(sender, pending);
+  persistPending(pending);
   const sent = await reply(msg, renderSummary(pending.drafts));
-  if (sent) { pending.summaryMsgId = sent.id._serialized; persistPending(sender, pending); }
+  if (sent) { pending.summaryMsgId = sent.id._serialized; persistPending(pending); }
 }
 
-async function commit(msg: WAMessage, sender: string): Promise<void> {
-  const pending = pendingDrafts.get(sender);
-  if (!pending) return;
-
-  // Boss's rule: a wedding expense must have BOTH a wedding date and a PIC
-  // (person in charge). If anything is still ???, refuse to save and ask for it.
-  const blocked = pending.drafts
-    .map((d, i) => ({ i, missing: missingRequired(d) }))
-    .filter((x) => x.missing.length);
-  if (blocked.length) {
-    pending.ts = Date.now(); // keep the draft alive so they can correct it
-    persistPending(sender, pending);
-    const lines = ['🚫 *Not saved yet — missing required info:*', ''];
-    for (const b of blocked) {
-      const label = pending.drafts.length > 1 ? `*${b.i + 1}.* ` : '';
-      lines.push(`${label}Please provide the *${b.missing.join('* and *')}*.`);
+/** Confirm one or more pendings. A draft still missing its wedding date / PIC is
+ *  held back (and listed) instead of saved. No TOTAL here — that's a daily-summary
+ *  thing, not a per-expense confirmation. */
+async function commitPendings(msg: WAMessage, pendings: Pending[]): Promise<void> {
+  let savedToNotion = 0;
+  let savedCount = 0;
+  const blockedLines: string[] = [];
+  for (const pending of pendings) {
+    // Boss's rule: a wedding expense must have BOTH a wedding date and a PIC.
+    const blocked = pending.drafts
+      .map((d, i) => ({ i, missing: missingRequired(d) }))
+      .filter((x) => x.missing.length);
+    if (blocked.length) {
+      pending.ts = Date.now(); // keep it alive so they can correct it
+      persistPending(pending);
+      for (const b of blocked) {
+        const label = pending.drafts.length > 1 ? `*${b.i + 1}.* ` : '';
+        const what = pending.drafts[b.i].vendorDescription ?? 'expense';
+        blockedLines.push(`${label}${what} — needs *${b.missing.join('* & *')}*`);
+      }
+      continue;
     }
-    lines.push('', 'Just reply with the missing detail (e.g. _16/06 christi_) and I\'ll update it, then reply *ok*.');
-    await reply(msg, lines.join('\n'));
-    return;
+    clearPending(pending);
+    const r = await savePending(pending, pending.sender);
+    savedToNotion += r.savedToNotion;
+    savedCount += r.count;
   }
 
-  clearPending(sender);
-  const { savedToNotion, total, count } = await savePending(pending, sender);
-
-  if (savedToNotion > 0) {
-    await reply(msg, `✅ Saved ${savedToNotion} expense${savedToNotion > 1 ? 's' : ''} to Notion. Total ${formatMoney(total)} ${config.currency}.`);
-  } else {
-    await reply(msg, `✅ Recorded ${count} expense${count > 1 ? 's' : ''} (${formatMoney(total)} ${config.currency}).\n_Notion preview mode — not written yet._`);
+  const out: string[] = [];
+  if (savedCount > 0) {
+    out.push(savedToNotion > 0
+      ? `✅ Saved ${savedCount} expense${savedCount > 1 ? 's' : ''} to Notion.`
+      : `✅ Recorded ${savedCount} expense${savedCount > 1 ? 's' : ''}. _(Notion preview mode — not written yet.)_`);
   }
+  if (blockedLines.length) {
+    out.push('🚫 *Not saved yet — missing required info:*', ...blockedLines,
+      '', "Reply with the missing detail (e.g. _16/06 christi_), then *ok*.");
+  }
+  if (out.length) await reply(msg, out.join('\n'));
 }
 
 /** Write every draft in a pending set to Notion + the local store. Shared by the
@@ -866,9 +889,11 @@ async function sweepPending(): Promise<void> {
     try {
       pending = JSON.parse(row.payload_json) as Pending;
     } catch {
-      store.deletePending(row.sender);
+      store.deletePending(row.id);
       continue;
     }
+    pending.id = row.id;          // columns are authoritative (older payloads lack these)
+    pending.sender = row.sender;
     const age = now - row.updated_at;
 
     // ── 8h: auto-save complete drafts; nudge blocked ones once. ──
@@ -880,12 +905,12 @@ async function sweepPending(): Promise<void> {
             '⏰ Reminder: a receipt is still waiting on its *wedding date* / *PIC* before I can save it. ' +
             'Please reply with the missing detail, then *ok*.';
           await sendToChat(row.chat_id, text, '[auto-reminder preview]');
-          store.markPendingReminded(row.sender);
+          store.markPendingReminded(row.id);
         }
         continue;
       }
-      clearPending(row.sender);
-      const { savedToNotion, total, count } = await savePending(pending, row.sender);
+      clearPending(pending);
+      const { savedToNotion, count } = await savePending(pending, row.sender);
       const items = pending.drafts
         .map((d) => `• ${d.vendorDescription ?? '???'} — ${formatMoney(d.cost)}`)
         .join('\n');
@@ -893,7 +918,7 @@ async function sweepPending(): Promise<void> {
       await sendToChat(
         row.chat_id,
         `⏱️ Auto-saved ${count} expense${count > 1 ? 's' : ''} ${where} after 8h with no *ok* reply:\n` +
-          `${items}\n*Total ${formatMoney(total)} ${config.currency}.*\nReply */undo* if any of these is wrong.`,
+          `${items}\nReply */undo* if any of these is wrong.`,
         '[auto-save preview]',
       );
       logger.info({ sender: row.sender, count, savedToNotion }, 'auto-saved pending drafts after grace period');
@@ -904,7 +929,7 @@ async function sweepPending(): Promise<void> {
     if (!pending.nudged30) {
       await sendNudge(row.sender, row.chat_id, pending);
       pending.nudged30 = true;
-      store.updatePendingPayload(row.sender, JSON.stringify(pending));
+      store.updatePendingPayload(row.id, JSON.stringify(pending));
     }
   }
 }
@@ -943,20 +968,18 @@ async function sendNudge(sender: string, chatId: string, pending: Pending): Prom
 function renderSummary(drafts: ExpenseDraft[]): string {
   if (drafts.length === 1) return renderOne(drafts[0]);
 
+  // Only happens for a burst sent together (one message / rapid run). No TOTAL —
+  // totals belong only in the nightly summary DM to the boss, not in the group.
   const lines: string[] = [`🧾 *Please confirm these ${drafts.length} expenses:*`, ''];
-  let total = 0;
   drafts.forEach((d, i) => {
     if (d.isReimbursement) {
-      total += d.reimbursed ?? 0;
       lines.push(`*${i + 1}.* ${d.vendorDescription ?? '???'} — ${formatMoney(d.reimbursed)} _(reimbursement)_`);
       return;
     }
-    total += d.cost ?? 0;
     const inv = d.invoiceDate ? `inv ${d.invoiceDate}` : 'inv —';
     const tag = d.isWedding ? `${inv} · wed ${displayWeddingDate(d)} · ${displayPic(d)}` : `${inv} · non-wedding`;
     lines.push(`*${i + 1}.* ${d.vendorDescription ?? '???'} — ${formatMoney(d.cost)} _(${tag})_`);
   });
-  lines.push('', `*TOTAL: ${formatMoney(total)} ${config.currency}*`);
   const fills = drafts.flatMap((d) => d.info);
   if (fills.length) lines.push('', 'ℹ️ ' + fills.join('\nℹ️ '));
   const warns = drafts.flatMap((d) => d.warnings);
@@ -1102,4 +1125,4 @@ async function reply(msg: WAMessage, text: string): Promise<WAMessage | null> {
 }
 
 /** Test-only hooks (not referenced in production paths). */
-export const __test = { finalize, commit, sweepPending, sendNudge, currentPending, pendingDrafts };
+export const __test = { finalize, commitPendings, sweepPending, sendNudge, currentPending, pendingsForSender, pendingDrafts };

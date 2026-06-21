@@ -70,8 +70,12 @@ db.exec(`
 
   -- Drafts awaiting an "ok". Persisted so they survive a restart and so a sweep
   -- can auto-save the ones nobody replied to after a grace period.
+  -- Each open draft-set is its OWN row (keyed by the triggering message id), so a
+  -- person can have SEVERAL independent pending confirmations at once — each shown,
+  -- nudged and saved on its own. They are never merged together.
   CREATE TABLE IF NOT EXISTS pending_drafts (
-    sender        TEXT PRIMARY KEY,   -- one open draft set per submitter
+    id            TEXT PRIMARY KEY,   -- the submission's message id
+    sender        TEXT NOT NULL,      -- who posted it (multiple rows per sender ok)
     chat_id       TEXT NOT NULL,      -- where to post the auto-save / reminder
     wa_message_id TEXT,
     payload_json  TEXT NOT NULL,      -- the serialized Pending (drafts, notes, ...)
@@ -83,6 +87,24 @@ db.exec(`
 // Migration: add the reimbursed column to existing expenses tables.
 if (!(db.prepare('PRAGMA table_info(expenses)').all() as any[]).some((c) => c.name === 'reimbursed')) {
   db.exec('ALTER TABLE expenses ADD COLUMN reimbursed INTEGER');
+}
+
+// Migration: pending_drafts used to be keyed by sender (one per person). Move to
+// id-keyed (many per person). Old rows carry over with id = their old sender.
+{
+  const cols = db.prepare('PRAGMA table_info(pending_drafts)').all() as any[];
+  if (cols.length && !cols.some((c) => c.name === 'id')) {
+    db.exec(`
+      ALTER TABLE pending_drafts RENAME TO pending_drafts_old;
+      CREATE TABLE pending_drafts (
+        id TEXT PRIMARY KEY, sender TEXT NOT NULL, chat_id TEXT NOT NULL, wa_message_id TEXT,
+        payload_json TEXT NOT NULL, updated_at INTEGER NOT NULL, reminded INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO pending_drafts (id, sender, chat_id, wa_message_id, payload_json, updated_at, reminded)
+        SELECT sender, sender, chat_id, wa_message_id, payload_json, updated_at, reminded FROM pending_drafts_old;
+      DROP TABLE pending_drafts_old;
+    `);
+  }
 }
 
 export interface InsertReceiptInput {
@@ -401,8 +423,9 @@ export const store = {
 
   // ---- pending drafts (awaiting "ok"; auto-saved after a grace period) ----
 
-  /** Create/replace the open draft set for a submitter. */
+  /** Create/replace ONE open draft set (keyed by its own id). */
   upsertPending(p: {
+    id: string;
     sender: string;
     chatId: string;
     waMessageId: string | null;
@@ -410,34 +433,34 @@ export const store = {
     updatedAt: number;
   }): void {
     db.prepare(
-      `INSERT INTO pending_drafts (sender, chat_id, wa_message_id, payload_json, updated_at, reminded)
-       VALUES (@sender, @chat, @wa, @payload, @updated, 0)
-       ON CONFLICT(sender) DO UPDATE SET
-         chat_id=@chat, wa_message_id=@wa, payload_json=@payload, updated_at=@updated, reminded=0`,
-    ).run({ sender: p.sender, chat: p.chatId, wa: p.waMessageId, payload: p.payloadJson, updated: p.updatedAt });
+      `INSERT INTO pending_drafts (id, sender, chat_id, wa_message_id, payload_json, updated_at, reminded)
+       VALUES (@id, @sender, @chat, @wa, @payload, @updated, 0)
+       ON CONFLICT(id) DO UPDATE SET
+         sender=@sender, chat_id=@chat, wa_message_id=@wa, payload_json=@payload, updated_at=@updated, reminded=0`,
+    ).run({ id: p.id, sender: p.sender, chat: p.chatId, wa: p.waMessageId, payload: p.payloadJson, updated: p.updatedAt });
   },
 
-  deletePending(sender: string): void {
-    db.prepare('DELETE FROM pending_drafts WHERE sender = ?').run(sender);
+  deletePending(id: string): void {
+    db.prepare('DELETE FROM pending_drafts WHERE id = ?').run(id);
   },
 
-  markPendingReminded(sender: string): void {
-    db.prepare('UPDATE pending_drafts SET reminded = 1 WHERE sender = ?').run(sender);
+  markPendingReminded(id: string): void {
+    db.prepare('UPDATE pending_drafts SET reminded = 1 WHERE id = ?').run(id);
   },
 
   /** Update only the stored payload (e.g. to record a 30-min nudge) without
    *  touching updated_at or the reminded flag, so the grace clocks keep running. */
-  updatePendingPayload(sender: string, payloadJson: string): void {
-    db.prepare('UPDATE pending_drafts SET payload_json = ? WHERE sender = ?').run(payloadJson, sender);
+  updatePendingPayload(id: string, payloadJson: string): void {
+    db.prepare('UPDATE pending_drafts SET payload_json = ? WHERE id = ?').run(payloadJson, id);
   },
 
   /** All open drafts (used to restore the in-memory map on startup). */
-  allPending(): { sender: string; chat_id: string; wa_message_id: string | null; payload_json: string; updated_at: number; reminded: number }[] {
+  allPending(): { id: string; sender: string; chat_id: string; wa_message_id: string | null; payload_json: string; updated_at: number; reminded: number }[] {
     return db.prepare('SELECT * FROM pending_drafts').all() as any[];
   },
 
   /** Open drafts last touched before `cutoff` (epoch ms) — candidates for auto-save. */
-  pendingOlderThan(cutoff: number): { sender: string; chat_id: string; wa_message_id: string | null; payload_json: string; updated_at: number; reminded: number }[] {
+  pendingOlderThan(cutoff: number): { id: string; sender: string; chat_id: string; wa_message_id: string | null; payload_json: string; updated_at: number; reminded: number }[] {
     return db.prepare('SELECT * FROM pending_drafts WHERE updated_at < ?').all(cutoff) as any[];
   },
 

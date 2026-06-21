@@ -312,7 +312,7 @@ async def embed(
     op, sc = _f(opacity, 0.2, 0.9, 0.55), _f(scale, 0.1, 0.4, 0.2)
     batch = f"B{int(time.time())}{secrets.token_hex(2)}"
     now = datetime.datetime.now().isoformat(timespec="seconds")
-    done, failed = 0, []
+    done, failed, last_err = 0, [], ""
     for f in files:
         code = wm.make_code()
         in_path = os.path.join(UP, f"{code}_{f.filename}")
@@ -325,9 +325,10 @@ async def embed(
             done += 1
         except Exception as e:
             # One unreadable/corrupt image must not 500 the whole upload — skip it
-            # and tell the user which file(s) failed.
+            # and tell the user which file(s) failed (and why, for diagnosis).
             logging.exception("watermark failed for %s", f.filename)
             failed.append(f.filename or "image")
+            last_err = f"{type(e).__name__}: {e}"
         finally:
             try:
                 os.remove(in_path)  # the original upload isn't needed after embedding
@@ -337,9 +338,12 @@ async def embed(
     db.commit()
     if done == 0:
         names = ", ".join(failed) or "the image"
+        hint = ("The server may be low on memory (free tier) — try one image at a time, "
+                "or wait a few seconds and retry.") if "Memory" in last_err else \
+               "It may be an unsupported or damaged file. Try a JPG or PNG, or a different photo."
+        detail = f'<p style="color:#8f8f8d;font-size:12px">{last_err}</p>' if last_err else ""
         return page(
-            f'<h1 class="bad">Couldn\'t process {names}</h1>'
-            '<p>It may be an unsupported or damaged file. Try a JPG or PNG, or a different photo.</p>'
+            f'<h1 class="bad">Couldn\'t process {names}</h1><p>{hint}</p>{detail}'
             '<a class="back" href="/" data-t="back">← back</a>',
             "add",
         )

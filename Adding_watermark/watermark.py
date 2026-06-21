@@ -14,6 +14,7 @@ fixed, the verifier needs no per-image metadata to decode it.
 from __future__ import annotations
 
 import os
+import gc
 import secrets
 import datetime
 from functools import lru_cache
@@ -143,22 +144,22 @@ def extract_invisible(path: str) -> str:
     return bwm.extract(path, wm_shape=wm_bit_len(), mode="str")
 
 
-def _downscaled(in_path: str, work_path: str) -> str:
-    """If the image's long side exceeds MAX_SIDE, write a downscaled, EXIF-rotated
-    copy to work_path and return it; otherwise return in_path unchanged. Keeps the
-    DWT-DCT embed within a small host's memory."""
-    try:
-        with Image.open(in_path) as im:
-            im = ImageOps.exif_transpose(im).convert("RGB")  # bake orientation
-            w, h = im.size
-            if max(w, h) <= MAX_SIDE:
-                return in_path
+def _prepare(in_path: str, work_path: str) -> str:
+    """Always write a clean, EXIF-rotated, RGB, size-capped JPEG working copy.
+    This guarantees the cv2 / blind-watermark steps get a sane image no matter
+    what the upload is (RGBA / palette / CMYK / 16-bit / odd orientation) — odd
+    modes were a source of hard failures — and caps resolution so the DWT-DCT
+    embed stays within a small host's memory."""
+    with Image.open(in_path) as im:
+        im = ImageOps.exif_transpose(im)  # bake phone orientation
+        if im.mode != "RGB":
+            im = im.convert("RGB")
+        w, h = im.size
+        if max(w, h) > MAX_SIDE:
             r = MAX_SIDE / max(w, h)
             im = im.resize((max(1, round(w * r)), max(1, round(h * r))), Image.LANCZOS)
-            im.save(work_path, "JPEG", quality=95)
-            return work_path
-    except Exception:
-        return in_path  # never block watermarking just because resize failed
+        im.save(work_path, "JPEG", quality=95)
+    return work_path
 
 
 def watermark_image(
@@ -173,14 +174,16 @@ def watermark_image(
 ) -> None:
     """Apply visible mark (optional) then embed the invisible code into the result."""
     work = out_path + ".src.jpg"
-    src = _downscaled(in_path, work)  # cap resolution first (memory/time)
     tmp = out_path + ".tmp.png"
-    if visible:
-        add_visible(src, tmp, opacity=opacity, scale=scale, position=position, text=visible_text)
-        src = tmp
+    src = _prepare(in_path, work)  # normalize + cap resolution first (memory/safety)
     try:
+        if visible:
+            add_visible(src, tmp, opacity=opacity, scale=scale, position=position, text=visible_text)
+            src = tmp
+        gc.collect()  # free the prepare/visible buffers before the float64-heavy embed
         embed_invisible(src, out_path, code)
     finally:
         for p in (tmp, work):
-            if p != in_path and os.path.exists(p):
+            if os.path.exists(p):
                 os.remove(p)
+        gc.collect()

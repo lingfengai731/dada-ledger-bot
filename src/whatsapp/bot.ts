@@ -346,6 +346,20 @@ async function handleMessage(msg: WAMessage): Promise<void> {
     return;
   }
 
+  // Scenario 3: a note that QUOTES an earlier photo is the note FOR that photo —
+  // pair them into one expense instead of recording the text on its own.
+  if (msg.hasQuotedMsg) {
+    try {
+      const q = await msg.getQuotedMessage();
+      if (q && !q.fromMe && q.hasMedia && (q.type === 'image' || q.type === 'document')) {
+        await onQuotedImageNote(msg, sender, q, body);
+        return;
+      }
+    } catch (err) {
+      logger.warn({ err }, 'could not load quoted message');
+    }
+  }
+
   const word = body.toLowerCase().replace(/[^a-z]/g, '');
   const pending = currentPending(sender);
   if (pending) {
@@ -387,14 +401,33 @@ async function handleMessage(msg: WAMessage): Promise<void> {
   }
 }
 
-async function onImage(msg: WAMessage, sender: string): Promise<void> {
-  const media = await msg.downloadMedia();
-  if (!media || !SUPPORTED_MEDIA.has(media.mimetype)) return;
+/** Saved-key for a message's media file (stable, derived from the message id) so
+ *  a later quoted note can find the draft that this same photo produced. */
+function mediaKey(messageId: string): string {
+  return messageId.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
 
-  const ext = media.mimetype === 'application/pdf' ? 'pdf' : (media.mimetype.split('/')[1] ?? 'jpg');
-  const imagePath = path.join(config.paths.imagesDir, `${msg.id._serialized.replace(/[^a-zA-Z0-9_-]/g, '_')}.${ext}`);
-  fs.writeFileSync(imagePath, Buffer.from(media.data, 'base64'));
-  const img: BufferedImage = { ts: Date.now(), mimetype: media.mimetype, data: media.data, imagePath };
+/** Download a message's media to disk and buffer it. Returns null if it isn't a
+ *  supported image/PDF or the download fails (so a quoted note still falls back
+ *  to a plain note instead of throwing). */
+async function bufferMedia(m: WAMessage): Promise<BufferedImage | null> {
+  try {
+    const media = await m.downloadMedia();
+    if (!media || !SUPPORTED_MEDIA.has(media.mimetype)) return null;
+    const ext = media.mimetype === 'application/pdf' ? 'pdf' : (media.mimetype.split('/')[1] ?? 'jpg');
+    const imagePath = path.join(config.paths.imagesDir, `${mediaKey(m.id._serialized)}.${ext}`);
+    fs.writeFileSync(imagePath, Buffer.from(media.data, 'base64'));
+    return { ts: Date.now(), mimetype: media.mimetype, data: media.data, imagePath };
+  } catch (err) {
+    logger.warn({ err }, 'media download failed');
+    return null;
+  }
+}
+
+async function onImage(msg: WAMessage, sender: string): Promise<void> {
+  const img = await bufferMedia(msg);
+  if (!img) return;
+  const imagePath = img.imagePath;
 
   // Staff usually post the photo WITH a caption ("0617 kyea ... trf ling"). That
   // caption is the note — capture it, or it's silently lost and the expense is
@@ -419,6 +452,38 @@ async function onImage(msg: WAMessage, sender: string): Promise<void> {
   c.image = img;
   if (caption) c.noteText = c.noteText ? `${c.noteText} ${caption}` : caption;
   schedule(sender);
+}
+
+/** A text note that quotes an earlier photo. Three cases, in order:
+ *  (a) that photo is still being collected → add the note to it (= scenario 4);
+ *  (b) that photo already became a draft → the note is its details, enrich it;
+ *  (c) otherwise → download the quoted photo and build one expense from photo+note. */
+async function onQuotedImageNote(msg: WAMessage, sender: string, quoted: WAMessage, note: string): Promise<void> {
+  const c = collecting.get(sender);
+  if (c?.image) {
+    c.noteText = c.noteText ? `${c.noteText} ${note}` : note;
+    schedule(sender);
+    return;
+  }
+
+  const key = mediaKey(quoted.id._serialized);
+  const pending = currentPending(sender);
+  const draft = pending?.drafts.find((d) => d.imagePath?.includes(key));
+  if (pending && draft) {
+    const follow = await parseEmployeeNote(note);
+    if (applyCorrection(draft, follow)) {
+      enrichDraft(draft);
+      await reReply(msg, sender, pending);
+    }
+    return;
+  }
+
+  const img = await bufferMedia(quoted);
+  if (!img) { await onNote(msg, sender, stripKeyword(note)); return; }
+  if (note && isReimbursementText(note)) { await buildReimbursement(msg, sender, note, img); return; }
+  const notes = note ? await parseEmployeeNotes(note) : [{ ...EMPTY_NOTE }];
+  const receipt = await readReceipt(img);
+  await finalize(msg, sender, notes, receipt, img.imagePath, []);
 }
 
 async function onNote(msg: WAMessage, sender: string, text: string): Promise<void> {

@@ -21,11 +21,20 @@ from functools import lru_cache
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from blind_watermark import WaterMark
 
+# iPhones save photos as HEIC by default; without this, Image.open() raises and
+# the whole request 500s (the "Internal Server Error" when adding a phone photo).
+try:
+    import pillow_heif  # type: ignore
+    pillow_heif.register_heif_opener()
+except Exception:
+    pass
+
 # Cap the working resolution. Phone/camera photos are often 12MP+, and the
 # DWT-DCT embed allocates several float64 copies of the whole image — enough to
-# blow past a 512MB host. 2000px on the long side is plenty for web/social use
-# and cuts memory & time ~4-9x. Override with WM_MAX_SIDE.
-MAX_SIDE = int(os.environ.get("WM_MAX_SIDE", "2000"))
+# blow past a 512MB host AND make each embed slow. 1280px on the long side is
+# plenty for web/social use and keeps each image well under ~5s even on a small
+# shared host. Override with WM_MAX_SIDE (e.g. 1600/2000 for higher fidelity).
+MAX_SIDE = int(os.environ.get("WM_MAX_SIDE", "1280"))
 
 # Secret seeds for the invisible watermark. The SAME values are needed to
 # extract, so keep them private and stable. In production they're set via env

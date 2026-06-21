@@ -14,6 +14,7 @@ import os
 import io
 import gc
 import time
+import logging
 import zipfile
 import sqlite3
 import secrets
@@ -57,10 +58,18 @@ app = FastAPI(title="DADA Watermark")
 
 @app.middleware("http")
 async def require_login(request: Request, call_next):
-    if PASSWORD and request.url.path not in ("/login", "/logo"):
+    if PASSWORD and request.url.path not in ("/login", "/logo", "/healthz"):
         if request.cookies.get("wm_auth") != _auth_token():
             return RedirectResponse("/login", status_code=302)
     return await call_next(request)
+
+
+@app.get("/healthz")
+def healthz():
+    # Unauthenticated, cheap. Point a free keep-alive pinger (UptimeRobot /
+    # cron-job.org) here every ~10 min so Render's free instance never cold-starts
+    # — that cold start is most of the "waited a long time" on the first upload.
+    return {"ok": True}
 
 
 STYLE = """
@@ -303,20 +312,37 @@ async def embed(
     op, sc = _f(opacity, 0.2, 0.9, 0.55), _f(scale, 0.1, 0.4, 0.2)
     batch = f"B{int(time.time())}{secrets.token_hex(2)}"
     now = datetime.datetime.now().isoformat(timespec="seconds")
+    done, failed = 0, []
     for f in files:
         code = wm.make_code()
         in_path = os.path.join(UP, f"{code}_{f.filename}")
         out_path = os.path.join(OUT, f"{code}.jpg")
-        with open(in_path, "wb") as fh:
-            fh.write(await f.read())
-        wm.watermark_image(in_path, out_path, code, visible=bool(visible), opacity=op, scale=sc, position=position)
-        db.execute("INSERT OR REPLACE INTO images VALUES (?,?,?,?,?,?)", (code, shoot, note, f.filename, now, batch))
         try:
-            os.remove(in_path)  # the original upload isn't needed after embedding
-        except OSError:
-            pass
-        gc.collect()  # release per-image arrays before the next one (512MB host)
+            with open(in_path, "wb") as fh:
+                fh.write(await f.read())
+            wm.watermark_image(in_path, out_path, code, visible=bool(visible), opacity=op, scale=sc, position=position)
+            db.execute("INSERT OR REPLACE INTO images VALUES (?,?,?,?,?,?)", (code, shoot, note, f.filename, now, batch))
+            done += 1
+        except Exception as e:
+            # One unreadable/corrupt image must not 500 the whole upload — skip it
+            # and tell the user which file(s) failed.
+            logging.exception("watermark failed for %s", f.filename)
+            failed.append(f.filename or "image")
+        finally:
+            try:
+                os.remove(in_path)  # the original upload isn't needed after embedding
+            except OSError:
+                pass
+            gc.collect()  # release per-image arrays before the next one (512MB host)
     db.commit()
+    if done == 0:
+        names = ", ".join(failed) or "the image"
+        return page(
+            f'<h1 class="bad">Couldn\'t process {names}</h1>'
+            '<p>It may be an unsupported or damaged file. Try a JPG or PNG, or a different photo.</p>'
+            '<a class="back" href="/" data-t="back">← back</a>',
+            "add",
+        )
     return RedirectResponse(f"/result/{batch}", status_code=303)
 
 

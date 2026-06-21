@@ -64,11 +64,12 @@ async def require_login(request: Request, call_next):
     return await call_next(request)
 
 
-@app.get("/healthz")
+@app.api_route("/healthz", methods=["GET", "HEAD"])
 def healthz():
     # Unauthenticated, cheap. Point a free keep-alive pinger (UptimeRobot /
-    # cron-job.org) here every ~10 min so Render's free instance never cold-starts
+    # cron-job.org) here every ~5 min so Render's free instance never cold-starts
     # — that cold start is most of the "waited a long time" on the first upload.
+    # Must accept HEAD: UptimeRobot probes with HEAD, and GET-only returns 405.
     return {"ok": True}
 
 

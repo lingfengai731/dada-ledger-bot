@@ -31,11 +31,12 @@ except Exception:
     pass
 
 # Cap the working resolution. Phone/camera photos are often 12MP+, and the
-# DWT-DCT embed allocates several float64 copies of the whole image — enough to
-# blow past a 512MB host AND make each embed slow. 1280px on the long side is
-# plenty for web/social use and keeps each image well under ~5s even on a small
-# shared host. Override with WM_MAX_SIDE (e.g. 1600/2000 for higher fidelity).
-MAX_SIDE = int(os.environ.get("WM_MAX_SIDE", "1280"))
+# DWT-DCT embed allocates several float64 copies of the whole image — too much
+# resolution both slows the embed and risks a MemoryError on a 512MB host.
+# 1600px on the long side is high quality for web/social delivery while staying
+# safe on a small instance. Override with WM_MAX_SIDE (e.g. 2000+ for max
+# fidelity — but that needs more RAM / a paid instance to stay reliable).
+MAX_SIDE = int(os.environ.get("WM_MAX_SIDE", "1600"))
 
 # Secret seeds for the invisible watermark. The SAME values are needed to
 # extract, so keep them private and stable. In production they're set via env

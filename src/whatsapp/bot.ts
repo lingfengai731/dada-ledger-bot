@@ -28,7 +28,6 @@ const SUPPORTED_MEDIA = new Set([...SUPPORTED_IMAGE, 'application/pdf']);
 // almost immediately.
 const DEBOUNCE_MS = 20 * 1000;
 const QUICK_MS = 3 * 1000;
-const MERGE_WINDOW_MS = 5 * 60 * 1000;
 const CONFIRM_WORDS = new Set(['ok', 'okay', 'okk', 'yes', 'y', 'ya', 'yep', 'yeah', 'confirm', 'confirmed', 'oke', 'betul', 'save', 'sip', 'good']);
 const CANCEL_WORDS = new Set(['cancel', 'no', 'nope', 'batal', 'skip']);
 
@@ -348,7 +347,8 @@ async function handleMessage(msg: WAMessage): Promise<void> {
   }
 
   const word = body.toLowerCase().replace(/[^a-z]/g, '');
-  if (pendingDrafts.has(sender)) {
+  const pending = currentPending(sender);
+  if (pending) {
     if (CONFIRM_WORDS.has(word) || body.includes('✅')) {
       await commit(msg, sender);
       return;
@@ -358,11 +358,20 @@ async function handleMessage(msg: WAMessage): Promise<void> {
       await reply(msg, '🗑️ Cancelled — nothing was saved.');
       return;
     }
-    // A message that looks like expense data (a date, amount, name, pic/wed
-    // label…) is treated as a correction. Anything else is just chatter — stay
-    // silent so the bot doesn't re-post the summary on every message.
-    if (looksLikeCorrection(body)) {
+    // "1. 130000" / "3. christi" → fix specific row(s) of the running set.
+    if (parseTargetedLines(body, pending.drafts.length).length) {
+      await correctRows(msg, sender, pending, body);
+      return;
+    }
+    // A message carrying its OWN amount/date is a NEW expense → collect it and
+    // ADD it to the running set (never overwrite it, never mistake it for a fix).
+    if (looksLikeExpense(body)) {
       await onNote(msg, sender, stripKeyword(body));
+      return;
+    }
+    // Otherwise a bare partial fix ("christi", "wed 16/6") → fill the blanks.
+    if (looksLikeCorrection(body)) {
+      await correctBare(msg, sender, pending, stripKeyword(body));
     }
     return;
   }
@@ -392,13 +401,17 @@ async function onImage(msg: WAMessage, sender: string): Promise<void> {
   // read from the image alone (wrong category/PIC/description).
   const caption = (msg.body ?? '').trim();
 
-  const pending = recentPending(sender);
-  if (pending && pending.drafts.length === 1) {
+  // A late receipt photo for the one expense we just showed (text first, photo
+  // after the collect window) → attach it to that draft and re-derive. A photo
+  // WITH its own caption, or when several expenses are pending, is a new expense
+  // and gets collected below.
+  const pending = currentPending(sender);
+  if (pending && pending.drafts.length === 1 && !pending.drafts[0].imagePath && !pending.drafts[0].isReimbursement && !caption) {
     const receipt = await readReceipt(img);
-    // If the photo carried a fresh caption, re-parse from it; else keep the
-    // existing note and just attach the photo.
-    const notes = caption ? await parseEmployeeNotes(caption) : pending.notes;
-    await finalize(msg, sender, notes, receipt, imagePath, ['Updated with the photo.']);
+    const note = pending.notes[0] ?? EMPTY_NOTE;
+    pending.drafts[0] = mergeToDraft(note, receipt, imagePath, pending.drafts[0].handler);
+    enrichDraft(pending.drafts[0]);
+    await reReply(msg, sender, pending);
     return;
   }
 
@@ -410,31 +423,8 @@ async function onImage(msg: WAMessage, sender: string): Promise<void> {
 
 async function onNote(msg: WAMessage, sender: string, text: string): Promise<void> {
   if (!text) return;
-  const pending = recentPending(sender);
-  if (pending && pending.drafts.length === 1) {
-    const follow = await parseEmployeeNote(text);
-    const looksComplete = follow.amount != null && Boolean(follow.description);
-    if (looksComplete) {
-      // A full new expense (has its own amount + description) — rebuild from it.
-      await finalize(msg, sender, [follow], pending.receipt, pending.imagePath, ['Updated with your note.']);
-    } else {
-      // A partial follow-up = a correction (e.g. "0616 christi"). Merge it in,
-      // but only re-post the summary if something actually changed.
-      const changed = applyCorrection(pending.drafts[0], follow);
-      if (changed) {
-        enrichDraft(pending.drafts[0]);
-        await reReply(msg, sender, pending);
-      }
-    }
-    return;
-  }
-  // A multi-expense batch is pending → route the correction to the right line(s)
-  // instead of starting a brand-new collection (the old bug: corrections to a
-  // batch were silently swallowed / misapplied to a later single draft).
-  if (pending && pending.drafts.length > 1) {
-    await correctBatch(msg, sender, pending, text);
-    return;
-  }
+  // Buffer the note; the debounce window pairs it with a photo if one is coming,
+  // then buildFromCollection → finalize, which ADDS it to any running set.
   const c = getCollecting(sender, msg);
   c.noteText = c.noteText ? `${c.noteText} ${text}` : text;
   schedule(sender);
@@ -456,45 +446,62 @@ function parseTargetedLines(text: string, count: number): { idx: number; rest: s
   const out: { idx: number; rest: string }[] = [];
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.replace(/\*/g, '').trim();
-    const m = line.match(/^(#|no\.?|item)?\s*(\d{1,2})\s*([.):\-]?)\s*(.+\S)\s*$/i);
+    // Row marker is EITHER a "#/no/item" prefix + number, OR a number followed by
+    // a "." ")" ":" "-" AND a space. The trailing space matters: "1. 130000" is a
+    // row marker, but "1.000.000 bunga" (an Indonesian amount) is NOT.
+    const m = line.match(/^(?:(?:#|no\.?|item)\s*(\d{1,2})|(\d{1,2})\s*[.):\-]\s+)(.+\S)\s*$/i);
     if (!m) continue;
-    // Treat the leading number as a row index only when it's clearly a list
-    // marker: either a "#/no/item" prefix, or a "." ")" ":" "-" after the number.
-    // (Bare "130000 putu" must NOT be read as "row 13".)
-    if (!m[1] && !m[3]) continue;
-    const idx = Number(m[2]);
-    if (idx >= 1 && idx <= count) out.push({ idx: idx - 1, rest: m[4].trim() });
+    const idx = Number(m[1] ?? m[2]);
+    if (idx >= 1 && idx <= count) out.push({ idx: idx - 1, rest: m[3].trim() });
   }
   return out;
 }
 
-/** Apply a correction to a pending multi-expense batch. Three shapes:
- *  (a) numbered fixes ("1. 130000", "3. christi") → patch just those rows;
- *  (b) a clean re-paste of the whole list (≥2 expenses) → rebuild the batch;
- *  (c) one ambiguous fix with no number → ask which row. */
-async function correctBatch(msg: WAMessage, sender: string, pending: Pending, text: string): Promise<void> {
+/** Numbered fixes ("1. 130000", "3. christi") → patch just those row(s). */
+async function correctRows(msg: WAMessage, sender: string, pending: Pending, text: string): Promise<void> {
   const targeted = parseTargetedLines(text, pending.drafts.length);
-  if (targeted.length) {
-    let any = false;
-    for (const { idx, rest } of targeted) {
-      const follow = await parseEmployeeNote(rest);
-      if (applyCorrection(pending.drafts[idx], follow)) { enrichDraft(pending.drafts[idx]); any = true; }
-    }
-    if (any) await reReply(msg, sender, pending);
-    else await reply(msg, '👍 Nothing changed there — reply *ok* to save all, or send a fix like *1. 130000*.');
-    return;
+  let any = false;
+  for (const { idx, rest } of targeted) {
+    const follow = await parseEmployeeNote(rest);
+    if (applyCorrection(pending.drafts[idx], follow)) { enrichDraft(pending.drafts[idx]); any = true; }
   }
-  // A full re-paste of the corrected list rebuilds the whole batch.
-  const notes = await parseEmployeeNotes(text);
-  if (notes.length >= 2) {
-    await finalize(msg, sender, notes, null, null, ['Rebuilt from your corrected list.']);
-    return;
+  if (any) await reReply(msg, sender, pending);
+  else await reply(msg, '👍 Nothing changed there — reply *ok* to save, or e.g. *1. 130000*.');
+}
+
+/** A bare partial fix ("christi", "wed 16/6") with no row number. Fill it into
+ *  every row that's MISSING that field (e.g. one "christi" sets PIC for all the
+ *  rows still lacking one). For a single pending row, also allow overriding. */
+async function correctBare(msg: WAMessage, sender: string, pending: Pending, text: string): Promise<void> {
+  const follow = await parseEmployeeNote(text);
+  let any = false;
+  for (const d of pending.drafts) {
+    if (applyMissing(d, follow)) { enrichDraft(d); any = true; }
   }
-  await reply(
-    msg,
-    `You have *${pending.drafts.length}* expenses pending — which one? Reply with its number, ` +
-    `e.g. *1. 130000* (fix the amount) or *3. christi* (set the PIC).`,
-  );
+  if (!any && pending.drafts.length === 1) {
+    if (applyCorrection(pending.drafts[0], follow)) { enrichDraft(pending.drafts[0]); any = true; }
+  }
+  if (any) await reReply(msg, sender, pending);
+  else if (pending.drafts.length > 1) {
+    await reply(msg, `You have *${pending.drafts.length}* expenses pending — which one? Reply with its number, e.g. *1. ${text}*.`);
+  }
+}
+
+/** Like applyCorrection but only fills fields that are currently EMPTY (used for a
+ *  bare fix applied across a batch, so it never clobbers a value already set). */
+function applyMissing(draft: ExpenseDraft, c: WeddingNote): boolean {
+  let changed = false;
+  const fill = <T,>(cur: T, next: T): T => {
+    if (cur == null && next != null) { changed = true; return next; }
+    return cur;
+  };
+  draft.weddingDate = fill(draft.weddingDate, c.weddingDate);
+  draft.invoiceDate = fill(draft.invoiceDate, c.invoiceDate);
+  draft.pic = fill(draft.pic, c.pic);
+  draft.location = fill(draft.location, c.location);
+  draft.handler = fill(draft.handler, c.buyer);
+  if (changed && (c.weddingDate || c.pic)) draft.isWedding = true;
+  return changed;
 }
 
 /** Overlay corrective fields from a follow-up note onto an existing draft.
@@ -523,14 +530,11 @@ function applyCorrection(draft: ExpenseDraft, c: WeddingNote): boolean {
   return changed;
 }
 
-function recentPending(sender: string): Pending | null {
-  const p = pendingDrafts.get(sender);
-  if (!p) return null;
-  if (Date.now() - p.ts > MERGE_WINDOW_MS) {
-    pendingDrafts.delete(sender);
-    return null;
-  }
-  return p;
+/** The sender's open (unconfirmed) expense set, if any. One per sender: new
+ *  submissions ACCUMULATE into it until they reply ok/cancel or it auto-saves,
+ *  so nothing a person posts is lost or left unnudged. */
+function currentPending(sender: string): Pending | null {
+  return pendingDrafts.get(sender) ?? null;
 }
 
 function getCollecting(sender: string, msg: WAMessage): Collecting {
@@ -622,11 +626,7 @@ async function buildReimbursement(
     : [buildReimbursementDraft(typedName, null, img.imagePath, noteText)];
   if (!transfers.length) drafts[0].warnings.push('Could not read any transfer in the screenshot — please check.');
 
-  const chatId = msg.from;
-  const pending: Pending = { drafts, notes: [], receipt: null, imagePath: img.imagePath, ts: Date.now(), waMessageId: msg.id._serialized, chatId };
-  persistPending(sender, pending);
-  const sent = await reply(msg, renderSummary(drafts));
-  if (sent) { pending.summaryMsgId = sent.id._serialized; persistPending(sender, pending); }
+  await addAndShow(msg, sender, drafts, [], null, img.imagePath);
 }
 
 /** The sender's WhatsApp display name (used to infer the handler in the real group). */
@@ -670,11 +670,24 @@ async function finalize(
   // Whoever posts the bill is usually the handler — resolve to a known person
   // (via the learned staff map, growing as colleagues post).
   const senderName = await resolveSenderPerson(msg);
-  const chatId = msg.from; // the group jid (where to post the auto-save later)
-  // The photo (if any) only enriches the first expense in a multi-expense message.
+
+  // A photo with a SINGLE typed expense: its printed total is authoritative, so
+  // mergeToDraft reconciles note-vs-receipt. But a MULTI-line list already states
+  // each amount — the photo is only proof, so attach it to the matching line (or
+  // the first) and never let it override a typed amount. Fixes "breakfast 130000
+  // shown as 300000" when one receipt rode along with a typed list.
+  const multi = notes.length > 1;
+  let photoLine = 0;
+  if (multi && receipt?.total != null) {
+    const m = notes.findIndex((n) => n.amount === receipt.total);
+    photoLine = m >= 0 ? m : 0;
+  }
   const drafts = notes.map((n, i) => {
-    const d = mergeToDraft(n, i === 0 ? receipt : null, i === 0 ? imagePath : null, senderName);
+    const useReceipt = multi ? null : i === 0 ? receipt : null;
+    const attach = i === photoLine ? imagePath : null;
+    const d = mergeToDraft(n, useReceipt, attach, senderName);
     if (i === 0) d.warnings.push(...extraWarnings);
+    if (multi && imagePath && i === photoLine) d.info.push('📎 Receipt photo attached here (kept your typed amounts).');
     // Fill missing wedding date / PIC from the schedule + recent context.
     enrichDraft(d);
     // Warn if this looks like an already-recorded receipt (same amount+date+item).
@@ -689,9 +702,30 @@ async function finalize(
     }
     return d;
   });
-  const pending: Pending = { drafts, notes, receipt, imagePath, ts: Date.now(), waMessageId: msg.id._serialized, chatId };
+  await addAndShow(msg, sender, drafts, notes, receipt, imagePath);
+}
+
+/** Show a freshly-built set of drafts: ADD them to the sender's running pending if
+ *  one is open (so separate submissions don't overwrite each other), else start a
+ *  new one. Re-posts the (combined) confirm summary and tracks its message id. */
+async function addAndShow(
+  msg: WAMessage,
+  sender: string,
+  drafts: ExpenseDraft[],
+  notes: WeddingNote[],
+  receipt: Receipt | null,
+  imagePath: string | null,
+): Promise<void> {
+  const existing = pendingDrafts.get(sender);
+  const pending: Pending = existing ?? {
+    drafts: [], notes: [], receipt, imagePath, ts: Date.now(), waMessageId: msg.id._serialized, chatId: msg.from,
+  };
+  pending.drafts.push(...drafts);
+  pending.notes.push(...notes);
+  pending.ts = Date.now();
+  pending.nudged30 = false; // new activity → restart the reminder/auto-save clock
   persistPending(sender, pending);
-  const sent = await reply(msg, renderSummary(drafts));
+  const sent = await reply(msg, renderSummary(pending.drafts));
   if (sent) { pending.summaryMsgId = sent.id._serialized; persistPending(sender, pending); }
 }
 
@@ -823,11 +857,17 @@ async function sendToChat(chatId: string, text: string, previewLabel: string, op
 /** Remind the staff member who posted an unconfirmed expense, @-mentioning them. */
 async function sendNudge(sender: string, chatId: string, pending: Pending): Promise<void> {
   const number = sender.split('@')[0];
-  const what = pending.drafts[0]?.vendorDescription ?? 'this expense';
+  const n = pending.drafts.length;
+  const total = pending.drafts.reduce((s, d) => s + (d.cost ?? d.reimbursed ?? 0), 0);
+  // Name the whole outstanding set, not just the first item (the old nudge only
+  // mentioned drafts[0], so a batch looked like a single expense).
+  const what = n > 1
+    ? `your *${n} expenses* (total ${formatMoney(total)} ${config.currency})`
+    : `*${pending.drafts[0]?.vendorDescription ?? 'this expense'}*`;
   const missing = [...new Set(pending.drafts.flatMap((d) => missingRequired(d)))];
   const text = missing.length
-    ? `⏰ @${number} I still need the *${missing.join('* & *')}* for *${what}* before I can save it. Reply with it, then *ok*.`
-    : `⏰ @${number} please confirm *${what}* — reply *ok* to save, or send a correction.`;
+    ? `⏰ @${number} I still need the *${missing.join('* & *')}* for ${what} before I can save. Reply with it, then *ok*.`
+    : `⏰ @${number} please confirm ${what} — reply *ok* to save all, or send a correction.`;
   // Quote the original confirm message so staff can tap to jump back to it.
   const opts: { mentions: string[]; quotedMessageId?: string } = { mentions: [sender] };
   const quote = pending.summaryMsgId ?? pending.waMessageId;
@@ -995,3 +1035,6 @@ async function reply(msg: WAMessage, text: string): Promise<WAMessage | null> {
   }
   return await msg.reply(text);
 }
+
+/** Test-only hooks (not referenced in production paths). */
+export const __test = { finalize, commit, sweepPending, sendNudge, currentPending, pendingDrafts };

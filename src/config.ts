@@ -16,6 +16,9 @@ export const config = {
   whatsapp: {
     groupName: process.env.WHATSAPP_GROUP_NAME ?? '',
     groupId: process.env.WHATSAPP_GROUP_ID ?? '',
+    /** Bot's own number (e.g. 8613078287710) to link via an 8-char pairing code
+     *  instead of scanning a QR — far easier when re-linking over SSH/console. */
+    pairNumber: (process.env.WA_PAIR_NUMBER ?? '').replace(/\D/g, ''),
   },
   notion: {
     apiKey: process.env.NOTION_API_KEY ?? '',

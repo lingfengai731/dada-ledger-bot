@@ -186,8 +186,25 @@ export function createBot() {
   });
   waClient = client;
 
-  client.on('qr', (qr) => {
-    logger.info('Scan this QR with WhatsApp → Linked devices → Link a device:');
+  let pairingAsked = false;
+  client.on('qr', async (qr) => {
+    // Preferred when re-linking remotely: an 8-char code typed on the phone
+    // ("Link with phone number instead") — no QR scanning needed.
+    if (config.whatsapp.pairNumber && !pairingAsked) {
+      pairingAsked = true;
+      try {
+        const code = await client.requestPairingCode(config.whatsapp.pairNumber);
+        const pretty = code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
+        logger.info(
+          `\n\n🔗 LINK WITH PHONE NUMBER — on the bot phone:\n` +
+            `   WhatsApp → Linked devices → Link a device → "Link with phone number instead"\n` +
+            `   then enter this code:        ${pretty}\n\n`,
+        );
+      } catch (err) {
+        logger.error({ err }, 'pairing-code request failed — fall back to the QR below');
+      }
+    }
+    logger.info('…or scan this QR (WhatsApp → Linked devices → Link a device):');
     qrcode.generate(qr, { small: true });
     // Also persist the raw QR so it can be rendered/scanned off-server when re-linking.
     try {

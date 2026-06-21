@@ -160,7 +160,9 @@ function toNote(parsed: any, rawText: string): WeddingNote {
 export async function parseEmployeeNotes(rawText: string): Promise<WeddingNote[]> {
   const response = await claude.messages.create({
     model: MODEL,
-    max_tokens: 2048,
+    // A burst of ~15 expenses serialises to ~3.5k tokens; 2048 truncated the JSON
+    // mid-object and the whole batch was lost. Give plenty of head-room.
+    max_tokens: 8192,
     system: buildSystem(),
     messages: [{ role: 'user', content: `${INSTRUCTION}\n\nMessage:\n"""${rawText}"""` }],
   });
@@ -211,6 +213,42 @@ function safeParse(text: string): Record<string, unknown> | null {
   try {
     return JSON.parse(cleaned.slice(start, end + 1));
   } catch {
-    return null;
+    // The model's JSON was cut off (e.g. token limit) → the final object is
+    // incomplete and JSON.parse fails on the whole thing. Rather than drop the
+    // entire batch, salvage every COMPLETE expense object we can read.
+    const salvaged = salvageExpenses(cleaned);
+    return salvaged.length ? { expenses: salvaged } : null;
   }
+}
+
+/** Recover the complete `{...}` elements of the "expenses" array from a string
+ *  whose tail was truncated. Walks the array tracking string/brace state and
+ *  keeps each top-level object that parses on its own. */
+function salvageExpenses(text: string): unknown[] {
+  const arrStart = text.indexOf('[', text.indexOf('"expenses"'));
+  if (arrStart === -1) return [];
+  const out: unknown[] = [];
+  let depth = 0;
+  let objStart = -1;
+  let inStr = false;
+  let esc = false;
+  for (let i = arrStart + 1; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === '{') { if (depth === 0) objStart = i; depth++; }
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0 && objStart !== -1) {
+        try { out.push(JSON.parse(text.slice(objStart, i + 1))); } catch { /* skip */ }
+        objStart = -1;
+      }
+    }
+  }
+  return out;
 }

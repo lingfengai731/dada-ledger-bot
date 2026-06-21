@@ -423,17 +423,78 @@ async function onNote(msg: WAMessage, sender: string, text: string): Promise<voi
       const changed = applyCorrection(pending.drafts[0], follow);
       if (changed) {
         enrichDraft(pending.drafts[0]);
-        pending.ts = Date.now();
-        persistPending(sender, pending);
-        const sent = await reply(msg, renderSummary(pending.drafts));
-        if (sent) { pending.summaryMsgId = sent.id._serialized; persistPending(sender, pending); }
+        await reReply(msg, sender, pending);
       }
     }
+    return;
+  }
+  // A multi-expense batch is pending → route the correction to the right line(s)
+  // instead of starting a brand-new collection (the old bug: corrections to a
+  // batch were silently swallowed / misapplied to a later single draft).
+  if (pending && pending.drafts.length > 1) {
+    await correctBatch(msg, sender, pending, text);
     return;
   }
   const c = getCollecting(sender, msg);
   c.noteText = c.noteText ? `${c.noteText} ${text}` : text;
   schedule(sender);
+}
+
+/** Persist the (mutated) pending batch and re-post the summary. */
+async function reReply(msg: WAMessage, sender: string, pending: Pending): Promise<void> {
+  pending.ts = Date.now();
+  persistPending(sender, pending);
+  const sent = await reply(msg, renderSummary(pending.drafts));
+  if (sent) { pending.summaryMsgId = sent.id._serialized; persistPending(sender, pending); }
+}
+
+/** Pull "N. <fix>" lines out of a correction to a multi-expense batch. Matches
+ *  "1. 130000", "#1 christi", "no 1 …", "item 3 …", "1) …" — one per line, and
+ *  tolerates the bot's own *bold* markdown when staff copy a line back. Only
+ *  indices within the batch are returned (0-based). */
+function parseTargetedLines(text: string, count: number): { idx: number; rest: string }[] {
+  const out: { idx: number; rest: string }[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/\*/g, '').trim();
+    const m = line.match(/^(#|no\.?|item)?\s*(\d{1,2})\s*([.):\-]?)\s*(.+\S)\s*$/i);
+    if (!m) continue;
+    // Treat the leading number as a row index only when it's clearly a list
+    // marker: either a "#/no/item" prefix, or a "." ")" ":" "-" after the number.
+    // (Bare "130000 putu" must NOT be read as "row 13".)
+    if (!m[1] && !m[3]) continue;
+    const idx = Number(m[2]);
+    if (idx >= 1 && idx <= count) out.push({ idx: idx - 1, rest: m[4].trim() });
+  }
+  return out;
+}
+
+/** Apply a correction to a pending multi-expense batch. Three shapes:
+ *  (a) numbered fixes ("1. 130000", "3. christi") → patch just those rows;
+ *  (b) a clean re-paste of the whole list (≥2 expenses) → rebuild the batch;
+ *  (c) one ambiguous fix with no number → ask which row. */
+async function correctBatch(msg: WAMessage, sender: string, pending: Pending, text: string): Promise<void> {
+  const targeted = parseTargetedLines(text, pending.drafts.length);
+  if (targeted.length) {
+    let any = false;
+    for (const { idx, rest } of targeted) {
+      const follow = await parseEmployeeNote(rest);
+      if (applyCorrection(pending.drafts[idx], follow)) { enrichDraft(pending.drafts[idx]); any = true; }
+    }
+    if (any) await reReply(msg, sender, pending);
+    else await reply(msg, '👍 Nothing changed there — reply *ok* to save all, or send a fix like *1. 130000*.');
+    return;
+  }
+  // A full re-paste of the corrected list rebuilds the whole batch.
+  const notes = await parseEmployeeNotes(text);
+  if (notes.length >= 2) {
+    await finalize(msg, sender, notes, null, null, ['Rebuilt from your corrected list.']);
+    return;
+  }
+  await reply(
+    msg,
+    `You have *${pending.drafts.length}* expenses pending — which one? Reply with its number, ` +
+    `e.g. *1. 130000* (fix the amount) or *3. christi* (set the PIC).`,
+  );
 }
 
 /** Overlay corrective fields from a follow-up note onto an existing draft.
@@ -800,7 +861,7 @@ function renderSummary(drafts: ExpenseDraft[]): string {
   if (stillMissing) {
     lines.push('', '🚫 Some expenses still show *???* — reply with the missing *wedding date* / *PIC* before I can save.');
   } else {
-    lines.push('', 'Reply *ok* to save all, *cancel* to discard.');
+    lines.push('', 'Reply *ok* to save all, *cancel* to discard.', 'To fix one, reply like *1. 130000* or *3. christi*.');
   }
   return lines.join('\n');
 }

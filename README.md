@@ -196,6 +196,22 @@ pm2 logs dada-bot --lines 20   # 看到 "WhatsApp client ready ✅" 即成功
 
 > 重启**不需要重新扫码**(`.wwebjs_auth` 是未跟踪文件,`git reset/pull` 不会动它)。新表/新列在启动时自动建/迁移。
 
+### 用手机号配对码连号 / 重连(免扫二维码)
+
+会话掉了、或第一次连号时,在 noVNC 里也能连——用 8 位**配对码**比扫码省事:
+
+```bash
+cd /opt/dada-ledger-bot
+echo 'WA_PAIR_NUMBER=8613078287710' >> .env   # 机器人自己的号(只需加一次)
+git pull origin main
+pm2 restart dada-bot
+pm2 logs dada-bot --raw                        # 等日志刷出 8 位配对码(形如 ABCD-1234)
+```
+
+然后在**机器人手机**上:WhatsApp → 设置 → 已链接的设备 → 链接设备 → **「改用电话号码链接」** → 输入那 8 位码(忽略中间的横杠)。看到 `WhatsApp client ready ✅` 后按 `Ctrl+C` 退出日志。
+
+> ⚠️ 配对码几分钟内有效;过期或没出来就 `pm2 restart dada-bot` 再看一次。**只连一次**,别反复试(WhatsApp 会因频繁连接临时限制账号)。`.env` 里 `WA_PAIR_NUMBER` 加过一次后就别重复 `echo` 了。
+
 ### 正式上线 / 切群
 
 1. 让管理员把 **DADA_BOT** 拉进目标群(进群后机器人会自动发中/英/印尼三语自我介绍;若漏发,群里打 `/help` 即可)。

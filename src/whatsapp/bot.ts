@@ -112,7 +112,12 @@ function restorePending(): void {
   let n = 0;
   for (const row of store.allPending()) {
     try {
-      pendingDrafts.set(row.id, JSON.parse(row.payload_json) as Pending);
+      const p = JSON.parse(row.payload_json) as Pending;
+      // Payloads saved before the multi-pending rework lack id/sender — the DB
+      // columns are authoritative, so "ok"/corrections still find them.
+      p.id = row.id;
+      p.sender = row.sender;
+      pendingDrafts.set(row.id, p);
       n++;
     } catch {
       store.deletePending(row.id);

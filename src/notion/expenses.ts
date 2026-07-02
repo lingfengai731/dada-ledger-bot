@@ -107,6 +107,8 @@ function buildProperties(
   if (draft.invoiceDate) properties['INVOICE DATE'] = { date: { start: draft.invoiceDate } };
   if (draft.isWedding && draft.weddingDate)
     properties['WEDDING DATE'] = { date: { start: draft.weddingDate } };
+  // Supplier bill Ling pays herself → tick the checkbox so she can filter her list.
+  if (draft.forLingPayment) properties['For Ling Payment?'] = { checkbox: true };
 
   const picRaw = draft.pic ? (PIC_ALIAS[draft.pic.trim().toUpperCase()] ?? draft.pic) : null;
   const pic = mapOption(picRaw, picOptions);

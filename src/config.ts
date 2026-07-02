@@ -11,7 +11,9 @@ const DATA_DIR = path.resolve(process.env.DATA_DIR ?? './data');
 export const config = {
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY ?? '',
-    model: process.env.ANTHROPIC_MODEL ?? 'claude-opus-4-8',
+    /** Model id, or 'auto'/'latest' to auto-pick the newest Opus at startup —
+     *  so the bot tracks the strongest model without a code change. */
+    model: process.env.ANTHROPIC_MODEL ?? 'auto',
   },
   whatsapp: {
     groupName: process.env.WHATSAPP_GROUP_NAME ?? '',

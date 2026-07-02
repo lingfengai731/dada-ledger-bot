@@ -2,6 +2,7 @@ import './bootstrap.js'; // MUST be first — installs proxy dispatcher before a
 import { assertConfig, config } from './config.js';
 import { logger } from './logger.js';
 import { createBot } from './whatsapp/bot.js';
+import { resolveModel } from './llm/claude.js';
 import { refreshFromNotion } from './schedule/weddingSchedule.js';
 import './db/store.js'; // initialize the database/schema on boot
 
@@ -15,9 +16,13 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Resolve the model first (ANTHROPIC_MODEL=auto → newest Opus from the API).
+  const model = await resolveModel();
+
   logger.info(
     {
-      model: config.anthropic.model,
+      model,
+      modelSetting: config.anthropic.model,
       notion: config.notion.hasToken ? config.notion.writeMode : 'no-token',
       dryRun: config.dryRun,
     },

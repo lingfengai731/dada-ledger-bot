@@ -115,6 +115,9 @@ wed <婚期>  pic <名字>  <金额>  <谁付的>  <东西>
   | `WEDDING DATE` | 婚期(婚礼单才写;经智能补全) |
   | `PIC`(multi_select) | 婚礼负责人 `LING/JAY/CHRISTI/PUTRI/GENERAL`,别名 `jessica/jesicha→JAY` |
   | `HANDLER`(multi_select) | 付款人/待报销人(`by/tf/trf <名字>`,或报销的收款人) |
+  | `For Ling Payment?`(checkbox) | 说明里含 `for ling payment` / `to be paid by ling` 时勾选(供应商账单由 Ling 自付) |
+
+> 📌 **结构变更(2026-07)**:AUTO-LEDGER 与 INVOICE 已移到共享的 **ADMIN** 空间;数据源 id **未变**,API 仍正常。`Ling Paid Date`(date)由 Ling 付款后**手动**填写,机器人不碰。
 
 - **收据原图**:写入成功后,把收据照片/PDF 作为图片/PDF 块**附到该 Notion 行的页面正文**(best-effort,失败不影响存账;开关 `NOTION_ATTACH_RECEIPTS`)。
 - **报销约定**(对齐历史账本):标题就是 `REIMBURSEMENT`、人名放 `HANDLER`、金额放 `REIMBURSED`。
@@ -127,7 +130,7 @@ wed <婚期>  pic <名字>  <金额>  <谁付的>  <东西>
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_MODEL=claude-opus-4-8
+ANTHROPIC_MODEL=auto                          # auto=启动时自动选最新最强的 Opus;也可写死如 claude-opus-4-8
 
 WHATSAPP_GROUP_ID=120363426839508686@g.us   # 测试群;上线改成真实 DADA 群 120363284134868849@g.us
 WA_PAIR_NUMBER=8613078287710                 # 机器人自己的号;设了就能用"手机号配对码"远程连号(免扫二维码)
@@ -243,6 +246,8 @@ pm2 restart dada-bot
 | 智能补全 | 婚礼日程表 + **场地优先** + 14 天上下文记忆 + 巴厘岛时间 |
 | 强制规则 | 婚礼支出缺婚期/PIC 显示 `???` 并拒绝保存 |
 | 报销 | 转账截图 → `REIMBURSED` 列(一图多笔、人名进 HANDLER) |
+| Ling 自付 | 说明含 `for ling payment` → 勾选 `For Ling Payment?`,照常进 AUTO-LEDGER,供 Ling 筛选自付 |
+| 模型 | `ANTHROPIC_MODEL=auto` 启动时自动选最新最强 Opus(不写死版本) |
 | 写入 Notion | AUTO-LEDGER + 本地 SQLite;**收据原图附到 Notion 行**;婚礼日程表实时读取 |
 | 兜底 | 30 分钟 @ 提醒 + 8 小时信息齐全自动写入;待确认时忽略闲聊不刷屏 |
 | 老板总结 | **每晚明细账单**(分支出/报销 + 当日 TOTAL)私发 Ling |

@@ -150,6 +150,8 @@ const INTRO_MESSAGE = [
   '',
   "Just send the receipt photo with a quick note — date, amount, who it's for. I'll read it, show you what I got, and save it once you reply *ok*. A few receipts in one message is fine too.",
   '',
+  "📌 Please add every expense *only once*, and include a photo of the *receipt / invoice* whenever you can. If a supplier bill is *for Ling to pay*, just add _for ling payment_ to your note and I'll flag it for her.",
+  '',
   'Please write the note like this — *use the words `wed` and `pic`*:',
   '_invoice date / `wed` date / `pic` name / amount / who paid / item_',
   '   e.g. _15/6  wed 16/6  pic christi  1.000.000  putu  bunga mitir_',
@@ -163,6 +165,8 @@ const INTRO_MESSAGE = [
   '👋 Halo semua, saya *DADA Ledger Bot*. Saya catat nota yang kalian kirim di sini biar nggak perlu input manual ke Notion.',
   '',
   'Kirim aja foto nota plus catatan singkat — tanggal, jumlah, untuk siapa. Saya baca, tunjukkan hasilnya, lalu simpan setelah Anda balas *ok*. Boleh beberapa nota sekaligus.',
+  '',
+  '📌 Mohon input setiap pengeluaran *sekali saja*, dan sertakan foto *nota / invoice* bila memungkinkan. Kalau tagihan supplier itu *dibayar oleh Ling*, tulis _for ling payment_ di catatan, nanti saya tandai untuk beliau.',
   '',
   'Tulis catatannya begini — *pakai kata `wed` dan `pic`*:',
   '_tanggal nota / `wed` tanggal / `pic` nama / jumlah / yang bayar / barang_',
@@ -978,7 +982,8 @@ function renderSummary(drafts: ExpenseDraft[]): string {
     }
     const inv = d.invoiceDate ? `inv ${d.invoiceDate}` : 'inv —';
     const tag = d.isWedding ? `${inv} · wed ${displayWeddingDate(d)} · ${displayPic(d)}` : `${inv} · non-wedding`;
-    lines.push(`*${i + 1}.* ${d.vendorDescription ?? '???'} — ${formatMoney(d.cost)} _(${tag})_`);
+    const ling = d.forLingPayment ? ' 💰(Ling to pay)' : '';
+    lines.push(`*${i + 1}.* ${d.vendorDescription ?? '???'} — ${formatMoney(d.cost)} _(${tag})_${ling}`);
   });
   const fills = drafts.flatMap((d) => d.info);
   if (fills.length) lines.push('', 'ℹ️ ' + fills.join('\nℹ️ '));
@@ -1018,6 +1023,7 @@ function renderOne(draft: ExpenseDraft): string {
   lines.push(`*Wedding date:* ${draft.isWedding ? displayWeddingDate(draft) : '—'}`);
   lines.push(`*PIC:* ${draft.isWedding ? displayPic(draft) : '—'}`);
   lines.push(`*Handler:* ${draft.handler ?? '—'}`);
+  if (draft.forLingPayment) lines.push('*💰 For Ling to pay:* yes');
   if (draft.info.length) lines.push('', 'ℹ️ ' + draft.info.join('\nℹ️ '));
   if (draft.warnings.length) lines.push('', '⚠️ ' + draft.warnings.join('\n⚠️ '));
 

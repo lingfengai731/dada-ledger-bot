@@ -24,6 +24,9 @@ export interface ExpenseDraft {
   reimbursed: number | null;
   /** true when this is Ling reimbursing a staff member (writes REIMBURSED, no COST/PIC/wedding). */
   isReimbursement: boolean;
+  /** true when the note marks this as a supplier bill LING must pay herself → ticks
+   *  the "For Ling Payment?" checkbox. Still a normal ledger row (COST written). */
+  forLingPayment: boolean;
   /** Raw PIC name from the note (mapped to a Notion option at write time). */
   pic: string | null;
   /** Raw HANDLER / payer name, mapped at write time. */
@@ -51,6 +54,24 @@ const PEOPLE_ALIAS: Record<string, string> = {
   CHRISTY: 'CHRISTI', CHRISTIE: 'CHRISTI', ANDRIAN: 'CHRISTI',
   JESICCA: 'JESICHA', JESSICHA: 'JESICHA',
 };
+
+/** A staff mark that this is a supplier bill LING must pay herself (NOT that Ling
+ *  already paid it). Ticks Notion's "For Ling Payment?" checkbox; the expense still
+ *  posts to the ledger as normal. Matches "for ling payment", "ling to pay", "to be
+ *  paid by ling", "ling payment" — but NOT "by/trf ling" (that's the handler). */
+const LING_PAYMENT_RE =
+  /\bfor\s+ling(?:'?s)?\s+pay(?:ment)?\b|\bling\s+to\s+pay\b|\bto\s+be\s+paid\s+by\s+ling\b|\bling\s+pay(?:ment)?\b/i;
+
+export function isForLingPayment(text: string | null | undefined): boolean {
+  return Boolean(text && LING_PAYMENT_RE.test(text));
+}
+
+/** Remove the "for ling payment" mark from a title so it doesn't pollute VENDOR/DESCRIPTION. */
+function stripLingPaymentMark(s: string | null): string | null {
+  if (!s) return s;
+  const cleaned = s.replace(LING_PAYMENT_RE, '').replace(/\s{2,}/g, ' ').replace(/[\s,·-]+$/, '').trim();
+  return cleaned || s;
+}
 
 /** Map a free name (sender display name, "TO X", a transfer's full name) to a known person. */
 export function matchPerson(name: string | null | undefined): string | null {
@@ -116,6 +137,7 @@ export function buildReimbursementDraft(
     cost: null,
     reimbursed: amount,
     isReimbursement: true,
+    forLingPayment: false,
     pic: null,
     handler,
     location: null,
@@ -208,7 +230,11 @@ export function mergeToDraft(
 
   const vendor = receipt?.vendor ?? null;
   const description = note.description ?? receipt?.items?.[0]?.name ?? null;
-  const vendorDescription = combineVendorDescription(vendor, description);
+  // "For Ling Payment?" — a supplier bill Ling pays herself. Read from the raw note.
+  const forLingPayment = isForLingPayment(note.rawText) || isForLingPayment(description) || isForLingPayment(note.notes);
+  const vendorDescription = forLingPayment
+    ? stripLingPaymentMark(combineVendorDescription(vendor, description))
+    : combineVendorDescription(vendor, description);
 
   // Prefer the printed receipt total; fall back to the amount typed in the note.
   let cost: number | null = receipt?.total ?? null;
@@ -246,6 +272,7 @@ export function mergeToDraft(
     cost,
     reimbursed: null,
     isReimbursement: false,
+    forLingPayment,
     pic: note.pic,
     handler,
     location: note.location,

@@ -74,7 +74,32 @@
 - 关键词(不分大小写):`wed` · `pic` · `shop` · `gen` · `by` · `for ling payment`。
 - **金额以员工打的字为准**(发票上数字多:手续费/小计/税,照片只作交叉核对,不一致会 ⚠️ 提醒但用打字金额)。
 - 确认消息的标题会带类型(_Please confirm this **WEDDING/SHOP/GENERAL** expense_),分类错了当场能看出来。
+- **没写 shop/gen/wed 时怎么分类**:有场地/婚期/PIC 线索 → 判 WEDDING(如 `for 27th Lovina`);毫无线索也默认偏向 WEDDING(业务本性),但会因缺 `wed`/`pic` 卡 `???` 不给保存。**分类错了回一句 `shop` / `gen` 即可翻转**(列表用 `2. shop` 指定行);补 `wed <日期>` 或 `pic <名字>` 则翻回 WEDDING。
 - **每笔只报一次**,尽量**附一张**收据/发票照片。
+
+### 成品卡片(贴在群描述里的英文版,员工照抄)
+
+```
+📋 DADA — Expense format
+
+One entry per expense.
+Attach one receipt/invoice photo.
+Start with the invoice date.
+End with 'for ling payment' if Ling pays the bill.
+
+Wedding:
+<inv date> wed <wedding date> pic <name> <amount> <item> by <who paid>
+e.g. 15/6 wed 16/6 pic christi 1.500.000 bunga mitir by putu
+
+Shop / General:
+<inv date> shop <amount> <item> by <who paid>
+<inv date> gen <amount> <item> by <who paid>
+e.g. 15/6 shop 250.000 vase stock by rania
+
+Keywords: wed · pic · shop · gen · by · for ling payment
+```
+
+> 机器人的**自我介绍**(进群自动发,`/help` 也会触发)已内置同一模板,英文 + 印尼语双语,见 `src/whatsapp/bot.ts` 的 `INTRO_MESSAGE`。改模板时记得三处同步:群描述卡片、`INTRO_MESSAGE`、解析提示词(`src/agents/messageParser.ts`)。
 - 婚礼单**务必**写 `wed` + `pic`;名字:`Ling / Jay / Christi / Putri`(**Jay = Jessica**)。发票日读不到照片时,开头手写的日期兜底。
 - 照片**带 caption 一条发**最方便;分两条发(照片 + 文字)也能拼上。
 - **报销(Ling 打款给员工)**:发转账截图 + 一句 `Reimbursement <名字>`,一张截图含多笔也行。

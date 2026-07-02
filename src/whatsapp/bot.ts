@@ -627,10 +627,21 @@ function applyCorrection(draft: ExpenseDraft, c: WeddingNote): boolean {
     draft.cost = c.amount;
     changed = true;
   }
-  if (c.weddingDate || c.pic || c.category === 'wedding' || c.isWedding) draft.isWedding = true;
-  // Keep the type in step with corrections ("wed 16/6" → WEDDING; "shop" → SHOP).
-  if (draft.isWedding) draft.expenseType = 'wedding';
-  else if (c.category === 'shop') draft.expenseType = 'shop';
+  // Type fixes. Only CONCRETE wedding signals (a wed date / a pic) flip to WEDDING —
+  // not the parser's default category, or a bare "1. 130000" amount fix could flip a
+  // SHOP draft. An explicit "shop"/"gen" word in the reply flips the type the other
+  // way (how staff correct a wrong auto-classification shown in the header).
+  const typeWord = c.rawText.match(/\b(shop|gen(?:eral)?)\b/i)?.[1]?.toLowerCase() ?? null;
+  if (typeWord && !c.weddingDate && !c.pic) {
+    const t = typeWord === 'shop' ? ('shop' as const) : ('general' as const);
+    if (draft.isWedding || draft.expenseType !== t) changed = true;
+    draft.isWedding = false;
+    draft.expenseType = t;
+  } else if (c.weddingDate || c.pic) {
+    if (!draft.isWedding) changed = true;
+    draft.isWedding = true;
+    draft.expenseType = 'wedding';
+  }
   return changed;
 }
 

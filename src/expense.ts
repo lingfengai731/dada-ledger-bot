@@ -1,4 +1,5 @@
 import type { Receipt, WeddingNote } from './types.js';
+import { baliTodayISO } from './util/dates.js';
 
 /**
  * One expense ready to be confirmed and written to Notion's EXPENSES data source.
@@ -113,35 +114,35 @@ function displayPerson(raw: string | null): string {
 }
 
 /**
- * A reimbursement (Ling paying a staff member back). Amount goes to the REIMBURSED
- * column, not COST; no wedding date / PIC. Recipient comes from the transfer's "To".
+ * A reimbursement — Ling paying a staff member back (boss's spec, 2026-07):
+ * staff name in the TITLE ("Reimbursement <name>"), HANDLER is always LING,
+ * amount into REIMBURSED (not COST), EXPENSE TYPE = Reimbursement, and the
+ * invoice date comes from the transfer image — else the day it was posted.
  */
 export function buildReimbursementDraft(
   recipientRaw: string | null,
   amount: number | null,
   imagePath: string | null,
   rawNote = '',
+  invoiceDate: string | null = null,
 ): ExpenseDraft {
   const who = displayPerson(recipientRaw);
-  const handler = matchPerson(recipientRaw);
   const warnings: string[] = [];
   if (amount == null) warnings.push('Could not read the transfer amount — please check.');
-  // Match the ledger convention: title is just "Reimbursement" with the person in
-  // HANDLER. Only keep the name in the title when it didn't map to a HANDLER option.
-  const title = handler ? 'Reimbursement' : `Reimbursement ${who}`;
+  if (who === '???') warnings.push('Who was reimbursed? Reply with the staff name.');
   return {
-    vendorDescription: title,
+    vendorDescription: who === '???' ? 'Reimbursement' : `Reimbursement ${who}`,
     vendor: 'Reimbursement',
     description: who,
     weddingDate: null,
     weddingEnd: null,
-    invoiceDate: null,
+    invoiceDate: invoiceDate ?? baliTodayISO(),
     cost: null,
     reimbursed: amount,
     isReimbursement: true,
     forLingPayment: false,
     pic: null,
-    handler,
+    handler: 'LING', // boss: the handler is always Ling (she pays staff back directly)
     location: null,
     isWedding: false,
     expenseType: 'reimbursement',

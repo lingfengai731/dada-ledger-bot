@@ -22,7 +22,7 @@ const HANDLER_FALLBACK = [
   'RANIA', 'HIRA', 'JAY', 'PUTRI', 'MINGGU', 'PUTU', 'LING', 'KENT', 'CHRISTI', 'MADE',
   'JESICHA', 'HAMZAH', 'JESSICA',
 ];
-const EXPENSE_TYPE_FALLBACK = ['Wedding', 'Shop', 'General'];
+const EXPENSE_TYPE_FALLBACK = ['Wedding', 'Shop', 'General', 'Reimbursement'];
 // Name aliases for the PIC column. Boss: "jessica" is the same person as JAY.
 // Staff spell names loosely (christy/jesicca…), seen in the real chat export.
 const PIC_ALIAS: Record<string, string> = {
@@ -109,8 +109,8 @@ function buildProperties(
     // Reimbursement: amount goes to REIMBURSED, not COST; no wedding/PIC.
     if (draft.reimbursed != null) properties['REIMBURSED'] = { number: draft.reimbursed };
   } else if (draft.cost != null) {
+    // COST only — the boss deleted the duplicate PRICE column (2026-07).
     properties['COST'] = { number: draft.cost };
-    properties['PRICE'] = { number: draft.cost }; // historical rows fill PRICE = COST
   }
   if (draft.invoiceDate) properties['INVOICE DATE'] = { date: { start: draft.invoiceDate } };
   if (draft.isWedding && draft.weddingDate)
@@ -118,12 +118,9 @@ function buildProperties(
   // Supplier bill Ling pays herself → tick the checkbox so she can filter her list.
   if (draft.forLingPayment) properties['For Ling Payment?'] = { checkbox: true };
 
-  // EXPENSE TYPE select (Wedding/Shop/General). Reimbursements have no such option
-  // — they're identified by the REIMBURSED column, so leave it blank for those.
-  if (draft.expenseType !== 'reimbursement') {
-    const etOpt = opts.expenseType.find((o) => o.toLowerCase() === draft.expenseType);
-    if (etOpt) properties['EXPENSE TYPE'] = { select: { name: etOpt } };
-  }
+  // EXPENSE TYPE select (Wedding/Shop/General/Reimbursement — boss added the last).
+  const etOpt = opts.expenseType.find((o) => o.toLowerCase() === draft.expenseType);
+  if (etOpt) properties['EXPENSE TYPE'] = { select: { name: etOpt } };
 
   const picRaw = draft.pic ? (PIC_ALIAS[draft.pic.trim().toUpperCase()] ?? draft.pic) : null;
   const pic = mapOption(picRaw, picOptions);

@@ -161,6 +161,8 @@ const INTRO_MESSAGE = [
   '   e.g. _15/6 wed 16/6 pic christi 1.500.000 bunga mitir by putu_',
   '*Shop / General:*  _<inv date> shop <amount> <item> by <who paid>_   (or *gen*)',
   '   e.g. _15/6 shop 250.000 vase stock by rania_',
+  '*Reimbursement (Ling → staff):*  _reimbursement <staff name>_ + the transfer screenshot',
+  '   e.g. _reimbursement putri_ — I read the amount & date from the screenshot.',
   '',
   "_Keywords: wed · pic · shop · gen · by · for ling payment_ — for weddings *wed* and *pic* are required (else you'll see *???*, just add them and reply *ok*).",
   '',
@@ -178,6 +180,8 @@ const INTRO_MESSAGE = [
   '   contoh: _15/6 wed 16/6 pic christi 1.500.000 bunga mitir by putu_',
   '*Shop / General:*  _<tgl invoice> shop <jumlah> <barang> by <yang bayar>_   (atau *gen*)',
   '   contoh: _15/6 shop 250.000 vase stock by rania_',
+  '*Reimbursement (Ling → staf):*  _reimbursement <nama staf>_ + screenshot transfernya',
+  '   contoh: _reimbursement putri_ — jumlah & tanggal saya baca dari screenshot.',
   '',
   '_Kata kunci: wed · pic · shop · gen · by · for ling payment_ — untuk wedding *wed* dan *pic* wajib (kalau tidak, muncul *???*, tambahkan lalu balas *ok*).',
   '',
@@ -401,7 +405,10 @@ async function handleMessage(msg: WAMessage): Promise<void> {
       await commitPendings(msg, targeted ? [targeted] : pendings);
       return;
     }
-    if (CANCEL_WORDS.has(word)) {
+    // "cancel" (exact) drops everything open; a message CONTAINING "cancel" that
+    // quotes a specific summary/submission (e.g. "Cancel unsaved expenses") drops
+    // just that one — the escape hatch for a mistaken submission.
+    if (CANCEL_WORDS.has(word) || (targeted && /\bcancel\b/i.test(body))) {
       const toCancel = targeted ? [targeted] : pendings;
       for (const p of toCancel) clearPending(p);
       await reply(msg, toCancel.length > 1 ? `🗑️ Cancelled ${toCancel.length} pending expenses.` : '🗑️ Cancelled — nothing was saved.');
@@ -410,6 +417,20 @@ async function handleMessage(msg: WAMessage): Promise<void> {
     // "1. 130000" / "3. christi" → fix specific row(s) of the targeted set.
     if (parseTargetedLines(body, target.drafts.length).length) {
       await correctRows(msg, target, body);
+      return;
+    }
+    // A BARE amount ("1132500" / "1.132.500") is a price fix for what's showing,
+    // not a new expense — real submissions follow the template (start with a date).
+    const bareAmt = body.replace(/\b(idr|rp)\b/gi, '').trim();
+    if (/^\d{1,3}(?:[.,]\d{3})+$|^\d{4,}$/.test(bareAmt)) {
+      const amt = Number(bareAmt.replace(/\D/g, ''));
+      if (target.drafts.length === 1) {
+        const d = target.drafts[0];
+        if (d.isReimbursement) d.reimbursed = amt; else d.cost = amt;
+        await reReply(msg, target);
+      } else {
+        await reply(msg, `Which one? Reply with its number, e.g. *1. ${bareAmt}*.`);
+      }
       return;
     }
     // A message carrying its OWN amount/date is a NEW, separate expense → its own
@@ -531,12 +552,19 @@ async function onNote(msg: WAMessage, sender: string, text: string): Promise<voi
   schedule(sender);
 }
 
+/** Post/repost a pending's confirm summary, @-tagging the submitter so they get a
+ *  notification to reply ok (boss: "tag the one who sent it to remind them"). */
+async function postSummary(msg: WAMessage, pending: Pending): Promise<void> {
+  const text = `${renderSummary(pending.drafts)}\n\n@${pending.sender.split('@')[0]}`;
+  const sent = await reply(msg, text, [pending.sender]);
+  if (sent) { pending.summaryMsgId = sent.id._serialized; persistPending(pending); }
+}
+
 /** Persist the (mutated) pending and re-post its summary. */
 async function reReply(msg: WAMessage, pending: Pending): Promise<void> {
   pending.ts = Date.now();
   persistPending(pending);
-  const sent = await reply(msg, renderSummary(pending.drafts));
-  if (sent) { pending.summaryMsgId = sent.id._serialized; persistPending(pending); }
+  await postSummary(msg, pending);
 }
 
 /** Pull "N. <fix>" lines out of a correction to a multi-expense batch. Matches
@@ -693,9 +721,11 @@ async function buildFromCollection(
   img: BufferedImage | null,
 ): Promise<void> {
   // Reimbursement: read the bank-transfer screenshot(s); each transfer = one row
-  // with the amount in REIMBURSED (no COST / wedding / PIC).
-  if (img && isReimbursementText(noteText)) {
-    await buildReimbursement(msg, sender, noteText, img);
+  // with the amount in REIMBURSED (no COST / wedding / PIC). Works text-only too
+  // ("14/6 reimbursement to putri 50000") — amount/date from the note then.
+  if (isReimbursementText(noteText)) {
+    if (img) await buildReimbursement(msg, sender, noteText, img);
+    else await buildReimbursementFromText(msg, sender, noteText);
     return;
   }
 
@@ -729,12 +759,24 @@ async function buildReimbursement(
           t.total,
           img.imagePath,
           noteText,
+          t.date ?? null, // invoice date from the transfer image; else entry date
         ),
       )
     : [buildReimbursementDraft(typedName, null, img.imagePath, noteText)];
   if (!transfers.length) drafts[0].warnings.push('Could not read any transfer in the screenshot — please check.');
 
   await showNewPending(msg, sender, drafts, [], null, img.imagePath);
+}
+
+/** Reimbursement typed WITHOUT a screenshot, e.g. "14/6 reimbursement to putri 50000".
+ *  Name from the words after "reimbursement (to)", amount/date parsed from the note
+ *  (date falls back to the day it was posted). */
+async function buildReimbursementFromText(msg: WAMessage, sender: string, noteText: string): Promise<void> {
+  const name = noteText.match(/\breimburse(?:ment|d)?\b\s*(?:to\s+)?([a-z][a-z'.-]*)/i)?.[1] ?? null;
+  const note = await parseEmployeeNote(noteText);
+  const draft = buildReimbursementDraft(name, note.amount, null, noteText, note.invoiceDate);
+  draft.warnings.push('No transfer screenshot attached — recorded from your note only.');
+  await showNewPending(msg, sender, [draft], [], null, null);
 }
 
 /** The sender's WhatsApp display name (used to infer the handler in the real group). */
@@ -829,8 +871,7 @@ async function showNewPending(
     ts: Date.now(), waMessageId: msg.id._serialized, chatId: msg.from,
   };
   persistPending(pending);
-  const sent = await reply(msg, renderSummary(pending.drafts));
-  if (sent) { pending.summaryMsgId = sent.id._serialized; persistPending(pending); }
+  await postSummary(msg, pending);
 }
 
 /** Confirm one or more pendings. A draft still missing its wedding date / PIC is
@@ -869,7 +910,7 @@ async function commitPendings(msg: WAMessage, pendings: Pending[]): Promise<void
   }
   if (blockedLines.length) {
     out.push('🚫 *Not saved yet — missing required info:*', ...blockedLines,
-      '', "Reply with the missing detail (e.g. _16/06 christi_), then *ok*.");
+      '', 'Reply with the missing detail (e.g. _16/06 christi_), then *ok* — or quote the one you want to drop and reply *cancel*.');
   }
   if (out.length) await reply(msg, out.join('\n'));
 }
@@ -1027,10 +1068,12 @@ function renderSummary(drafts: ExpenseDraft[]): string {
 function renderOne(draft: ExpenseDraft): string {
   if (draft.isReimbursement) {
     const lines = [
-      '💸 *Please confirm this reimbursement:*',
+      '💸 *Please confirm this REIMBURSEMENT:*',
       '',
-      `*Reimbursed to:* ${draft.handler ?? draft.description ?? '???'}`,
-      `*Amount:* ${formatMoney(draft.reimbursed)} ${config.currency}`,
+      `*Reimbursed to:* ${draft.description ?? '???'}`,
+      `*Amount:* ${formatMoney(draft.reimbursed)} ${config.currency} _(→ REIMBURSED)_`,
+      `*Invoice date:* ${draft.invoiceDate ?? '—'}`,
+      `*Handler:* ${draft.handler ?? 'LING'}`,
     ];
     if (draft.info.length) lines.push('', 'ℹ️ ' + draft.info.join('\nℹ️ '));
     if (draft.warnings.length) lines.push('', '⚠️ ' + draft.warnings.join('\n⚠️ '));
@@ -1148,12 +1191,12 @@ function renderOwed(handler: string): string {
   return lines.join('\n');
 }
 
-async function reply(msg: WAMessage, text: string): Promise<WAMessage | null> {
+async function reply(msg: WAMessage, text: string, mentions?: string[]): Promise<WAMessage | null> {
   if (config.dryRun) {
     logger.info('\n[reply preview]\n' + text);
     return null;
   }
-  return await msg.reply(text);
+  return await msg.reply(text, undefined, mentions?.length ? { mentions } : undefined);
 }
 
 /** Test-only hooks (not referenced in production paths). */

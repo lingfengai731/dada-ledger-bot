@@ -159,7 +159,7 @@ cancel / cancel all — discard instead
   | `WEDDING DATE` | 婚期(婚礼单才写;经智能补全) |
   | `PIC`(multi_select) | 婚礼负责人 `LING/JAY/CHRISTI/PUTRI/GENERAL`,别名 `jessica/jesicha→JAY` |
   | `HANDLER`(multi_select) | 付款人/待报销人(`by/tf/trf <名字>`,或报销的收款人) |
-  | `For Ling Payment?`(checkbox) | 说明里含 `for ling payment` / `to be paid by ling` 时勾选(供应商账单由 Ling 自付) |
+  | `For Ling Payment?`(checkbox) | 说明里含 `for ling payment` / `to be paid by ling` 时勾选(供应商账单由 Ling 自付);此时 **HANDLER 自动 = LING** |
   | `EXPENSE TYPE`(select) | 机器人按判定自动填 `Wedding` / `Shop` / `General` / `Reimbursement`;选项实时同步 |
 
 > 📌 **结构变更(2026-07)**:AUTO-LEDGER 与 INVOICE 已移到共享的 **ADMIN** 空间;数据源 id **未变**,API 仍正常。`Ling Paid Date`(date)由 Ling 付款后**手动**填写,机器人不碰。
@@ -319,7 +319,7 @@ pm2 restart dada-bot
 | 1 | 婚礼(标准格式) | `15/6 wed 16/6 pic christi 1.500.000 bunga mitir by putu` | 标题 _confirm this **WEDDING** expense_;6 字段全对;Notion `EXPENSE TYPE=Wedding` |
 | 2 | Shop | `15/6 shop 250.000 vase stock by rania` | 标题 **SHOP**;婚期/PIC 为 `—`;Notion `EXPENSE TYPE=Shop` |
 | 3 | Gen | `15/6 gen 80.000 office snacks by putu` | 标题 **GENERAL**;Notion `EXPENSE TYPE=General` |
-| 4 | Ling 自付 | `15/6 gen 6.500.000 anggrek supplier bill for ling payment` | 显示 `💰 For Ling to pay: yes`;`ok` 后 Notion `For Ling Payment?` 打勾 |
+| 4 | Ling 自付 | `15/6 gen 6.500.000 anggrek supplier bill for ling payment` | 显示 `💰 For Ling to pay: yes` 且 **Handler: LING**;`ok` 后 Notion `For Ling Payment?` 打勾、HANDLER=LING |
 | 5 | 打字金额优先 | 转账截图(含手续费)+ 文字金额写含费总额 | **用打字金额**;差额出 ⚠️ `using your typed amount` |
 | 6 | 图+文一条发 | 收据照片,caption 写 #1 那行 | ~3 秒快速回,拼成一笔 |
 | 7 | 图文分开 | 先发照片,10 秒内再发文字(顺序随意) | 拼成一笔 |

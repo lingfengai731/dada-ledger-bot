@@ -263,8 +263,11 @@ export function mergeToDraft(
     warnings.push('The photo was hard to read clearly — please check the amount, or resend a sharper photo.');
   }
 
-  const { handler, conflict } = pickHandler(senderName, receipt?.recipient ?? null, note.buyer);
-  if (conflict) warnings.push(conflict);
+  // "for ling payment" = Ling pays the bill herself → the HANDLER is automatically
+  // LING (boss's rule; distinct from reimbursements, where HANDLER = the staff).
+  const { handler: picked, conflict } = pickHandler(senderName, receipt?.recipient ?? null, note.buyer);
+  const handler = forLingPayment ? 'LING' : picked;
+  if (conflict && !forLingPayment) warnings.push(conflict);
 
   return {
     vendorDescription,

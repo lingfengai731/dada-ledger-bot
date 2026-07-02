@@ -51,8 +51,8 @@ do NOT use it as the amount — record it in "notes" instead.
     notes "300.000 likely gosend/ongkir". NOT 300000, NOT 6552000.
   • "bunga 1.500.000 + ongkir 50.000" → amount 1550000 only if the note clearly means a
     combined total; otherwise amount 1500000 and note the 50.000 ongkir.
-If a receipt photo is also attached, its printed grand total is the source of truth for the
-amount — the note's numbers are only a cross-check.
+The amount the staff TYPED is the source of truth — an attached receipt photo is only a
+cross-check (invoices carry many numbers: fees, subtotals, VAT).
 
 DATE FORMAT VARIES BY PERSON: some write month/day ("06/13"), others day/month ("13/06").
 Both mean 13 June. Use the value that yields a valid 2026 date; when ambiguous, prefer the

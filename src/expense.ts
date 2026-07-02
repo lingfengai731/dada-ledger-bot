@@ -239,12 +239,14 @@ export function mergeToDraft(
     ? stripLingPaymentMark(combineVendorDescription(vendor, description))
     : combineVendorDescription(vendor, description);
 
-  // Prefer the printed receipt total; fall back to the amount typed in the note.
-  let cost: number | null = receipt?.total ?? null;
-  if (cost === null) cost = note.amount;
+  // Boss's rule: the amount the staff TYPED always wins — invoices carry many
+  // numbers (fees, subtotals, VAT) and the photo reader can grab the wrong one
+  // (e.g. read 1.130.000 and miss the 2.500 fee of a 1.132.500 transfer). The
+  // receipt total is only a cross-check: warn on mismatch, keep the typed amount.
+  let cost: number | null = note.amount ?? receipt?.total ?? null;
   if (receipt?.total != null && note.amount != null && receipt.total !== note.amount) {
     warnings.push(
-      `Receipt total (${receipt.total}) ≠ amount in note (${note.amount}) — using receipt total.`,
+      `Receipt shows ${receipt.total} but your note says ${note.amount} — using your typed amount.`,
     );
   }
 

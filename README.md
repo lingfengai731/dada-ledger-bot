@@ -72,6 +72,8 @@
 ```
 
 - 关键词(不分大小写):`wed` · `pic` · `shop` · `gen` · `by` · `for ling payment`。
+- **金额以员工打的字为准**(发票上数字多:手续费/小计/税,照片只作交叉核对,不一致会 ⚠️ 提醒但用打字金额)。
+- 确认消息的标题会带类型(_Please confirm this **WEDDING/SHOP/GENERAL** expense_),分类错了当场能看出来。
 - **每笔只报一次**,尽量**附一张**收据/发票照片。
 - 婚礼单**务必**写 `wed` + `pic`;名字:`Ling / Jay / Christi / Putri`(**Jay = Jessica**)。发票日读不到照片时,开头手写的日期兜底。
 - 照片**带 caption 一条发**最方便;分两条发(照片 + 文字)也能拼上。

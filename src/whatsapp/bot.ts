@@ -628,6 +628,9 @@ function applyCorrection(draft: ExpenseDraft, c: WeddingNote): boolean {
     changed = true;
   }
   if (c.weddingDate || c.pic || c.category === 'wedding' || c.isWedding) draft.isWedding = true;
+  // Keep the type in step with corrections ("wed 16/6" → WEDDING; "shop" → SHOP).
+  if (draft.isWedding) draft.expenseType = 'wedding';
+  else if (c.category === 'shop') draft.expenseType = 'shop';
   return changed;
 }
 
@@ -988,7 +991,11 @@ function renderSummary(drafts: ExpenseDraft[]): string {
       return;
     }
     const inv = d.invoiceDate ? `inv ${d.invoiceDate}` : 'inv —';
-    const tag = d.isWedding ? `${inv} · wed ${displayWeddingDate(d)} · ${displayPic(d)}` : `${inv} · non-wedding`;
+    // Type is visible per line (WED with its date/PIC; SHOP/GENERAL named) so a
+    // wrong auto-classification is caught before saving.
+    const tag = d.isWedding
+      ? `${inv} · wed ${displayWeddingDate(d)} · ${displayPic(d)}`
+      : `${inv} · ${d.expenseType.toUpperCase()}`;
     const ling = d.forLingPayment ? ' 💰(Ling to pay)' : '';
     lines.push(`*${i + 1}.* ${d.vendorDescription ?? '???'} — ${formatMoney(d.cost)} _(${tag})_${ling}`);
   });
@@ -1021,8 +1028,9 @@ function renderOne(draft: ExpenseDraft): string {
   }
 
   // Boss-approved fixed layout — the same 6 fields every time (non-wedding shows
-  // "—" for the wedding fields, not a "Type: non-wedding" line).
-  const lines: string[] = ['🧾 *Please confirm this expense:*', ''];
+  // "—" for the wedding fields). The TYPE lives in the header ("this SHOP expense")
+  // so staff can catch a wrong auto-classification before it's saved.
+  const lines: string[] = [`🧾 *Please confirm this ${draft.expenseType.toUpperCase()} expense:*`, ''];
   lines.push(`*Vendor / description:* ${draft.vendorDescription ?? '???'}`);
   lines.push(`*Cost:* ${formatMoney(draft.cost)} ${config.currency}`);
   lines.push(`*Invoice date:* ${draft.invoiceDate ?? '—'}`);

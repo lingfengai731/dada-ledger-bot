@@ -91,10 +91,8 @@ export function enrichDraft(draft: ExpenseDraft): string[] {
         }
       } else if (!datesAtVenue.has(draft.weddingDate)) {
         if (confident) {
-          notes.push(
-            `Wedding date adjusted to ${target.weddingDate} from the schedule (${target.client || target.venue}) — ` +
-              `the note said ${draft.weddingDate}, but there's no wedding at ${target.venue} that day. Correct me if wrong.`,
-          );
+          // Boss: keep this short — "adjusted to <date> at <location>. Correct me if wrong."
+          notes.push(`Wedding date adjusted to ${target.weddingDate} at ${target.venue}. Correct me if wrong.`);
           draft.weddingDate = target.weddingDate;
         } else {
           notes.push(`Heads up: ${draft.weddingDate} isn't a ${target.venue} wedding date on the schedule — please double-check.`);

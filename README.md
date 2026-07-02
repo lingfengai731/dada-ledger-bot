@@ -43,7 +43,7 @@
 - **每一笔单独确认**:每条提交各自回一条确认,用固定 **6 字段格式**(Vendor/description、Cost、Invoice date、Wedding date、PIC、Handler)。**不同提交永不合并**,也不会把别人或你上一条的支出粘在一起。
 - **一次性连发很多笔**(一条消息多行 / 几秒内连发)才会汇总成**一条带编号的列表**(`1. … 2. …`);老板早上发的 15 笔就是这种。
 - **群里不显示 TOTAL**:合计只出现在**每晚私发老板的明细总结**里,群内确认从不算总额。
-- **回复**:`ok` 保存(你名下所有待确认都会保存;引用某条只确认那一条)、`cancel` 取消。
+- **回复**(老板定版):`ok` = 只确认**最近一笔**;**引用**某条确认消息再回 `ok` = 只确认那一条;`ok all` / `all ok` = 确认你名下全部。`cancel` 同理(`cancel all` 全取消)。
 - **改某一笔**:对编号列表回 `1. 130000`(改金额)、`3. christi`(设 PIC);只发 `christi` 会给**所有缺 PIC 的行**补上。
 - **多人并发不互串**:按各自 WhatsApp id 分别记账;一个人也能同时有多条待确认,各自提醒、各自保存,互不覆盖。
 
@@ -105,7 +105,7 @@ Keywords: wed · pic · shop · gen · by · for ling payment
 - 婚礼单**务必**写 `wed` + `pic`;名字:`Ling / Jay / Christi / Putri`(**Jay = Jessica**)。发票日读不到照片时,开头手写的日期兜底。
 - 照片**带 caption 一条发**最方便;分两条发(照片 + 文字)也能拼上。
 - **报销(Ling 打款给员工;只有 Ling 用)**:`reimbursement <员工名>` + 转账截图(一张截图含多笔也行;纯文字也能记,如 `14/6 reimbursement to putri 50000`)。金额/日期从截图读,截图没日期就用**发进群当天**;**PIC 恒为 LING、HANDLER=被报销的员工**,金额进 `REIMBURSED`,标题 `REIMBURSEMENT <名字>`,`EXPENSE TYPE=Reimbursement`。
-- **发错了怎么删**:引用发错的原消息(或机器人的确认摘要),回一句含 `cancel` 的话(如 `cancel unsaved expenses`)即可只删那一笔;单发 `cancel` 是取消你名下全部待确认。
+- **发错了怎么删**:引用发错的原消息(或机器人的确认摘要),回一句含 `cancel` 的话(如 `cancel unsaved expenses`)即可只删那一笔;单发 `cancel` 删最近一笔;`cancel all` 取消你名下全部待确认。
 - **改金额**:直接回一个**纯数字**(如 `1.132.500`)= 修正当前显示那笔的金额,不会被当成新账。
 
 ## 三、★ 智能补全(2026-06 升级)
@@ -322,7 +322,8 @@ pm2 restart dada-bot
 | 11 | 按行纠错 | 对列表回 `1. 130000` / `3. christi` | 只改那一行,重发摘要 |
 | 12 | 补缺 | 缺 PIC 时回 `christi` | 所有缺 PIC 的行补上(已有的不动) |
 | 13 | 缺必填拦截 | 婚礼单不写 wed/pic | 显示 `???`;回 `ok` 拒绝保存 |
-| 14 | 确认/取消/撤销 | `ok` / `cancel` / `/undo` | 保存全部 / 丢弃 / 撤销上一笔并归档 Notion 行 |
+| 14 | 确认/取消/撤销 | `ok` / `ok all` / `cancel` / `/undo` | `ok`=只存最近一笔;`ok all`=存全部;`cancel`=删最近(引用则删那条,`cancel all` 全删);`/undo` 撤销上一笔并归档 Notion 行 |
+| 14b | 引用确认 | 引用某条旧确认回 `ok` | 只保存被引用那一笔 |
 | 15 | 报销(截图) | 转账截图 + `reimbursement putri` | 💸 报销确认;金额/日期从截图读;Notion:标题 `REIMBURSEMENT PUTRI`、**PIC=LING、HANDLER=PUTRI**、`EXPENSE TYPE=Reimbursement` |
 | 15b | 报销(纯文字) | `14/6 reimbursement to putri 50000` | 同上,金额/日期取自文字(没日期用当天) |
 | 15c | 纯数字改金额 | 对着确认回 `1.132.500` | 修正那笔的金额(不是新账) |

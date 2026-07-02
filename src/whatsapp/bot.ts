@@ -400,16 +400,17 @@ async function handleMessage(msg: WAMessage): Promise<void> {
     const targeted = quotedId ? pendings.find((p) => p.summaryMsgId === quotedId || p.waMessageId === quotedId) ?? null : null;
     const target = targeted ?? pendings[pendings.length - 1];
 
-    if (CONFIRM_WORDS.has(word) || body.includes('✅')) {
-      // A plain "ok" confirms everything still open; a quoted "ok" just that one.
-      await commitPendings(msg, targeted ? [targeted] : pendings);
+    // Boss's rule: a plain "ok" confirms ONLY the most recent submission (or the
+    // quoted one); "ok all" / "all ok" confirms everything open. Same for cancel.
+    const wantsAll = word === 'okall' || word === 'allok' || word === 'cancelall' || word === 'allcancel';
+    if (CONFIRM_WORDS.has(word) || word === 'okall' || word === 'allok' || body.includes('✅')) {
+      await commitPendings(msg, wantsAll ? pendings : [targeted ?? target]);
       return;
     }
-    // "cancel" (exact) drops everything open; a message CONTAINING "cancel" that
-    // quotes a specific summary/submission (e.g. "Cancel unsaved expenses") drops
-    // just that one — the escape hatch for a mistaken submission.
-    if (CANCEL_WORDS.has(word) || (targeted && /\bcancel\b/i.test(body))) {
-      const toCancel = targeted ? [targeted] : pendings;
+    // "cancel" drops the most recent (or quoted — e.g. "Cancel unsaved expenses"
+    // quoting a summary); "cancel all" drops everything open.
+    if (CANCEL_WORDS.has(word) || word === 'cancelall' || word === 'allcancel' || (targeted && /\bcancel\b/i.test(body))) {
+      const toCancel = wantsAll ? pendings : [targeted ?? target];
       for (const p of toCancel) clearPending(p);
       await reply(msg, toCancel.length > 1 ? `🗑️ Cancelled ${toCancel.length} pending expenses.` : '🗑️ Cancelled — nothing was saved.');
       return;

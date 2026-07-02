@@ -44,6 +44,7 @@
 - **一次性连发很多笔**(一条消息多行 / 几秒内连发)才会汇总成**一条带编号的列表**(`1. … 2. …`);老板早上发的 15 笔就是这种。
 - **群里不显示 TOTAL**:合计只出现在**每晚私发老板的明细总结**里,群内确认从不算总额。
 - **回复**(老板定版):`ok` = 只确认**最近一笔**;**引用**某条确认消息再回 `ok` = 只确认那一条;`ok all` / `all ok` = 确认你名下全部。`cancel` 同理(`cancel all` 全取消)。
+- **Saved 回执带引用**:`✅ Saved to Notion.` 会**引用最初那条提交消息**,点一下就能跳回去,明确"存的是哪一笔"(`ok all` 时每笔各回一条)。
 - **改某一笔**:对编号列表回 `1. 130000`(改金额)、`3. christi`(设 PIC);只发 `christi` 会给**所有缺 PIC 的行**补上。
 - **多人并发不互串**:按各自 WhatsApp id 分别记账;一个人也能同时有多条待确认,各自提醒、各自保存,互不覆盖。
 
@@ -97,6 +98,12 @@ Shop / General:
 e.g. 15/6 shop 250.000 vase stock by rania
 
 Keywords: wed · pic · shop · gen · by · for ling payment
+
+Confirming:
+ok — save your latest one
+quote one + ok — save that one
+ok all — save all yours
+cancel / cancel all — discard instead
 ```
 
 > 报销格式**不进卡片**(老板:只有 Ling 用,员工不需要);但保留在机器人自我介绍里。

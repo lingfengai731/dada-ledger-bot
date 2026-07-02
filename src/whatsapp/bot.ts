@@ -166,6 +166,8 @@ const INTRO_MESSAGE = [
   '',
   "_Keywords: wed · pic · shop · gen · by · for ling payment_ — for weddings *wed* and *pic* are required (else you'll see *???*, just add them and reply *ok*).",
   '',
+  '*Confirming:*  _ok_ = your latest one · quote one + _ok_ = that one · _ok all_ = all yours · _cancel_ / _cancel all_ = discard instead.',
+  '',
   "I'm a bot, so I only jump in when there's a receipt. Chat away, I won't get in the way. Saved one by mistake? Reply */undo*. Tell me who you are once with */iam <name>* (e.g. _/iam christi_) so I credit your bills correctly. Other things: */total*, */ask*, */help*.",
   '',
   '— — — — —',
@@ -184,6 +186,8 @@ const INTRO_MESSAGE = [
   '   contoh: _reimbursement putri_ — jumlah & tanggal saya baca dari screenshot.',
   '',
   '_Kata kunci: wed · pic · shop · gen · by · for ling payment_ — untuk wedding *wed* dan *pic* wajib (kalau tidak, muncul *???*, tambahkan lalu balas *ok*).',
+  '',
+  '*Konfirmasi:*  _ok_ = yang terbaru · quote satu + _ok_ = yang itu · _ok all_ = semua punyamu · _cancel_ / _cancel all_ = batalkan.',
   '',
   'Saya cuma bot, jadi saya muncul kalau ada nota aja. Santai ngobrol, nggak bakal saya ganggu. Salah simpan? Balas */undo*. Kasih tahu sekali siapa Anda dengan */iam <nama>* (mis. _/iam christi_) biar nota Anda dicatat benar. Lainnya: */total*, */ask*, */help*.',
 ].join('\n');
@@ -881,6 +885,7 @@ async function showNewPending(
 async function commitPendings(msg: WAMessage, pendings: Pending[]): Promise<void> {
   let savedToNotion = 0;
   let savedCount = 0;
+  const savedPendings: Pending[] = [];
   const blockedLines: string[] = [];
   for (const pending of pendings) {
     // Boss's rule: a wedding expense must have BOTH a wedding date and a PIC.
@@ -901,19 +906,21 @@ async function commitPendings(msg: WAMessage, pendings: Pending[]): Promise<void
     const r = await savePending(pending, pending.sender);
     savedToNotion += r.savedToNotion;
     savedCount += r.count;
+    savedPendings.push(pending);
   }
 
-  const out: string[] = [];
   if (savedCount > 0) {
-    // Boss: keep it to a plain "Saved" — no count (a bare "ok" may commit several
-    // open drafts at once, and the number read as a mystery running total).
-    out.push(savedToNotion > 0 ? '✅ Saved to Notion.' : '✅ Recorded. _(Notion preview mode — not written yet.)_');
+    // Boss: keep it to a plain "Saved" — no count. Quote each ORIGINAL submission
+    // so it's unambiguous which entry was recorded (tap to jump back to it).
+    const text = savedToNotion > 0 ? '✅ Saved to Notion.' : '✅ Recorded. _(Notion preview mode — not written yet.)_';
+    for (const p of savedPendings) {
+      await sendToChat(p.chatId, text, '[saved receipt preview]', { quotedMessageId: p.waMessageId });
+    }
   }
   if (blockedLines.length) {
-    out.push('🚫 *Not saved yet — missing required info:*', ...blockedLines,
-      '', 'Reply with the missing detail (e.g. _16/06 christi_), then *ok* — or quote the one you want to drop and reply *cancel*.');
+    await reply(msg, ['🚫 *Not saved yet — missing required info:*', ...blockedLines,
+      '', 'Reply with the missing detail (e.g. _16/06 christi_), then *ok* — or quote the one you want to drop and reply *cancel*.'].join('\n'));
   }
-  if (out.length) await reply(msg, out.join('\n'));
 }
 
 /** Write every draft in a pending set to Notion + the local store. Shared by the

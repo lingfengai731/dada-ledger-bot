@@ -28,16 +28,20 @@ Today is ${baliTodayISO()} (Bali / WITA time — that is the staff's "now"). All
 in 2026 unless a year is written. Money uses "." or "," as the THOUSANDS separator:
 "82,500" = 82500, "2.115.750" = 2115750, "1,029,665" = 1029665. Output integers.
 
-PREFERRED LABELED FORMAT (staff are being trained to write notes like this):
-   <invoice date>  wed <wedding date>  pic <name>  <amount>  <who paid>  <item>
-   e.g. "15/6 wed 16/6 pic christi 1.000.000 putu bunga mitir"
-- "wed <date>" / "WED <date>" EXPLICITLY marks the WEDDING/event date → weddingDate.
-- "pic <name>" / "PIC <name>" EXPLICITLY marks the wedding person-in-charge → pic (normalize the name).
-- These labels are AUTHORITATIVE: whenever "wed"/"pic" appear, use them and do NOT second-guess
-  from position. A "pic <name>" is the pic, never the buyer.
-- The invoice date is OPTIONAL and usually OMITTED — it is read from the receipt photo. Leave
-  invoiceDate null unless the staff explicitly typed one. Staff may force it with "inv dd/mm"
-  (a workaround when the photo's date is unreadable) — only then set invoiceDate. Never invent one.
+TEAM STANDARD FORMAT (the agreed template — trust it). The line STARTS with the invoice date:
+   <invoice date>  <type>  <amount>  <item>  by <who paid>
+   where <type> is one of:   wed <wedding date> pic <name>   |   shop   |   gen
+   e.g. "15/6 wed 16/6 pic christi 1.500.000 bunga mitir by putu"   (wedding)
+        "15/6 shop 250.000 vase stock by rania"                     (shop)
+        "15/6 gen 80.000 office snacks by putu"                     (general)
+- The FIRST date is the invoiceDate → set it. (A receipt photo's printed date still overrides.)
+- "wed <date>" EXPLICITLY marks the WEDDING/event date → weddingDate; "pic <name>" marks the
+  person-in-charge → pic. Both are AUTHORITATIVE — never second-guess them from position.
+- "shop" → category "shop"; "gen" or "general" → category "general" (no weddingDate/pic for these).
+- ITEM comes BEFORE the payer. "by <name>" (also tf/trf) at the END = the buyer/handler.
+- The END may instead be "for ling payment" / "to be paid by ling": that is a PAYMENT FLAG
+  (Ling pays the bill herself), NOT a buyer and NOT part of the item — do not put it in
+  "buyer" or "description". Parse the rest of the line normally.
 
 TWO AMOUNTS in ONE expense (not separate expenses): when a single purchase line has
 two numbers, the "amount" is the INVOICE / grand total — usually the LARGER one. A smaller
@@ -66,9 +70,9 @@ weddingDate 2026-06-16. If only one date appears, treat it as the invoiceDate (a
 weddingDate only if the text clearly refers to an event).
 
 CATEGORY — set exactly one:
-- "general": clearly NOT a wedding — markers include "(General)", "studio", "office",
-  "Reimbursement", "for stocks". Leave weddingDate null.
-- "shop": for the retail shop — markers include "for shop", "shop=", "Wish for shop". weddingDate null.
+- "general": clearly NOT a wedding — markers include a leading "gen" or "general", "(General)",
+  "studio", "office", "Reimbursement", "for stocks". Leave weddingDate null.
+- "shop": for the retail shop — markers include a leading "shop", "for shop", "shop=", "Wish for shop". weddingDate null.
 - "wedding": everything else (the default for this business). It IS a wedding when there's a
   venue, a wedding date, or a PIC. A VENUE is any hotel/villa/resort/estate/place name —
   often in parentheses, e.g. "(komaneka)", "(pandawa)", "(samabe)", "(The Seed)". When you

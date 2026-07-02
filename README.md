@@ -59,17 +59,23 @@
 
 ## 二、员工怎么写(笔记格式)
 
-老板定的标准格式(用 `wed` 和 `pic` 两个关键词,机器人最高优先级识别):
+老板与团队商定的最终格式(2026-07;也贴在群描述里)。**开头先写发票日期**,**东西在「谁付」之前**,结尾 `by <谁付>` 可换成 `for ling payment`:
 
 ```
-wed <婚期>  pic <名字>  <金额>  <谁付的>  <东西>
-例: wed 16/6  pic christi  1.000.000  putu  bunga mitir
+婚礼:   <发票日> wed <婚期> pic <负责人> <金额> <东西> by <谁付>
+        例: 15/6 wed 16/6 pic christi 1.500.000 bunga mitir by putu
+采购/日常: <发票日> shop <金额> <东西> by <谁付>
+        或 <发票日> gen  <金额> <东西> by <谁付>
+        例: 15/6 shop 250.000 vase stock by rania
+交给 Ling 付: 把结尾 `by <谁付>` 换成 `for ling payment`
+        例: 15/6 gen 6.500.000 anggrek supplier bill for ling payment
 ```
 
-- **发票日期不用打** —— 优先从收据照片自动读;读不到再让员工补(可用 `inv 15/6` 强制),空着也不挡保存。
-- 婚礼单**务必**写 `wed <婚期>` 和 `pic <名字>`;名字:`Ling / Jay / Christi / Putri`(**Jay = Jessica**)。
+- 关键词(不分大小写):`wed` · `pic` · `shop` · `gen` · `by` · `for ling payment`。
+- **每笔只报一次**,尽量**附一张**收据/发票照片。
+- 婚礼单**务必**写 `wed` + `pic`;名字:`Ling / Jay / Christi / Putri`(**Jay = Jessica**)。发票日读不到照片时,开头手写的日期兜底。
 - 照片**带 caption 一条发**最方便;分两条发(照片 + 文字)也能拼上。
-- **报销(Ling)**:发转账截图 + 一句 `Reimbursement <名字>`,一张截图含多笔也行。
+- **报销(Ling 打款给员工)**:发转账截图 + 一句 `Reimbursement <名字>`,一张截图含多笔也行。
 
 ## 三、★ 智能补全(2026-06 升级)
 

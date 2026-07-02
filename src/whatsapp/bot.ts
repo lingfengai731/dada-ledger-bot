@@ -23,10 +23,10 @@ type WAChat = pkg.Chat;
 const SUPPORTED_IMAGE = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const SUPPORTED_MEDIA = new Set([...SUPPORTED_IMAGE, 'application/pdf']);
 // Adaptive collect window. When we're still missing half of an expense (only a
-// photo, or only a note), wait longer for the other half to arrive. When the
-// message already has BOTH a photo and a note, it's self-contained — process
-// almost immediately.
-const DEBOUNCE_MS = 20 * 1000;
+// photo, or only a note), wait for the other half to arrive. When the message is
+// self-contained — photo+caption together, or a note that already follows the
+// team template — process almost immediately. Tune with COLLECT_WAIT_MS.
+const DEBOUNCE_MS = Number(process.env.COLLECT_WAIT_MS ?? 12 * 1000);
 const QUICK_MS = 3 * 1000;
 const CONFIRM_WORDS = new Set(['ok', 'okay', 'okk', 'yes', 'y', 'ya', 'yep', 'yeah', 'confirm', 'confirmed', 'oke', 'betul', 'save', 'sip', 'good']);
 const CANCEL_WORDS = new Set(['cancel', 'no', 'nope', 'batal', 'skip']);
@@ -687,13 +687,21 @@ function getCollecting(sender: string, msg: WAMessage): Collecting {
   return c;
 }
 
+/** A note that already follows the team template (invoice date first + a type
+ *  keyword) is self-contained — no need to wait for a photo before replying.
+ *  If a photo does arrive later, the late-photo path attaches it to the draft. */
+function isTemplateNote(text: string | undefined): boolean {
+  if (!text) return false;
+  return /^\s*\d{1,2}\s*[\/.\-]\s*\d{1,2}\s+.*\b(wed|shop|gen|general|reimburse\w*)\b/i.test(text.trim());
+}
+
 function schedule(sender: string): void {
   const c = collecting.get(sender);
   if (!c) return;
   if (c.timer) clearTimeout(c.timer);
-  // Both a photo and a note already? Self-contained → respond fast. Otherwise
-  // keep waiting for the missing half.
-  const complete = Boolean(c.image) && Boolean(c.noteText && c.noteText.trim());
+  // Photo+note together, or a template-format note? Self-contained → respond
+  // fast. Otherwise keep waiting for the missing half.
+  const complete = (Boolean(c.image) && Boolean(c.noteText && c.noteText.trim())) || isTemplateNote(c.noteText);
   const delay = complete ? QUICK_MS : DEBOUNCE_MS;
   c.timer = setTimeout(() => {
     collecting.delete(sender);

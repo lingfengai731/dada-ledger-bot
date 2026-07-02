@@ -9,6 +9,15 @@ export const claude = new Anthropic({
   ...(proxyFetch ? { fetch: proxyFetch as unknown as typeof fetch } : {}),
 });
 
+/** Fast model for TEXT parsing (structured extraction from short notes). Vision
+ *  (receipt reading) and Q&A stay on the top model. Override or disable with
+ *  ANTHROPIC_PARSE_MODEL (set it to "main" to use the main model for everything). */
+export const PARSE_MODEL_SETTING = (process.env.ANTHROPIC_PARSE_MODEL ?? 'claude-sonnet-4-6').trim();
+
+export function parseModel(): string {
+  return PARSE_MODEL_SETTING.toLowerCase() === 'main' ? MODEL : PARSE_MODEL_SETTING;
+}
+
 /** The model every agent uses. A live binding: `resolveModel()` may update it at
  *  startup, and importers (which read `MODEL` at call time) pick up the new value. */
 export let MODEL = config.anthropic.model === 'auto' || config.anthropic.model === 'latest'

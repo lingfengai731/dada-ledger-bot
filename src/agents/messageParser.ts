@@ -1,4 +1,4 @@
-import { claude, MODEL } from '../llm/claude.js';
+import { claude, parseModel } from '../llm/claude.js';
 import { logger } from '../logger.js';
 import { baliTodayISO } from '../util/dates.js';
 import type { WeddingNote } from '../types.js';
@@ -163,7 +163,9 @@ function toNote(parsed: any, rawText: string): WeddingNote {
 /** Parse a note that may contain several expenses. Returns at least one. */
 export async function parseEmployeeNotes(rawText: string): Promise<WeddingNote[]> {
   const response = await claude.messages.create({
-    model: MODEL,
+    // Fast model for text notes (speed: staff wait for this reply). Vision keeps
+    // the top model.
+    model: parseModel(),
     // A burst of ~15 expenses serialises to ~3.5k tokens; 2048 truncated the JSON
     // mid-object and the whole batch was lost. Give plenty of head-room.
     max_tokens: 8192,

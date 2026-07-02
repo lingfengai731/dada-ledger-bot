@@ -176,6 +176,8 @@ cancel / cancel all — discard instead
 ```
 ANTHROPIC_API_KEY=sk-ant-...
 ANTHROPIC_MODEL=auto                          # auto=启动时自动选最新最强的 Opus;也可写死如 claude-opus-4-8
+ANTHROPIC_PARSE_MODEL=claude-sonnet-4-6       # 读文字说明用的快模型(读图仍用上面的);设 main 则全用主模型
+COLLECT_WAIT_MS=12000                         # 图文分开发时等配对的毫秒数(默认 12 秒;符合模板的消息不等,~3 秒直接处理)
 
 WHATSAPP_GROUP_ID=120363426839508686@g.us   # 测试群;上线改成真实 DADA 群 120363284134868849@g.us
 WA_PAIR_NUMBER=8613078287710                 # 机器人自己的号;设了就能用"手机号配对码"远程连号(免扫二维码)

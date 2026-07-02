@@ -22,6 +22,7 @@ const HANDLER_FALLBACK = [
   'RANIA', 'HIRA', 'JAY', 'PUTRI', 'MINGGU', 'PUTU', 'LING', 'KENT', 'CHRISTI', 'MADE',
   'JESICHA', 'HAMZAH', 'JESSICA',
 ];
+const EXPENSE_TYPE_FALLBACK = ['Wedding', 'Shop', 'General'];
 // Name aliases for the PIC column. Boss: "jessica" is the same person as JAY.
 // Staff spell names loosely (christy/jesicca…), seen in the real chat export.
 const PIC_ALIAS: Record<string, string> = {
@@ -38,28 +39,35 @@ const notion = config.notion.hasToken
 
 // Live PIC/HANDLER option lists, read from the EXPENSES data source schema so
 // the bot stays in sync when the boss renames/adds options (e.g. RANIA→HIRA).
-let optCache: { pic: string[]; handler: string[] } | null = null;
+type Options = { pic: string[]; handler: string[]; expenseType: string[] };
+let optCache: Options | null = null;
 let optTs = 0;
 const OPT_TTL_MS = 15 * 60 * 1000;
+const FALLBACK_OPTS: Options = { pic: PIC_FALLBACK, handler: HANDLER_FALLBACK, expenseType: EXPENSE_TYPE_FALLBACK };
 
-async function getOptions(): Promise<{ pic: string[]; handler: string[] }> {
+async function getOptions(): Promise<Options> {
   if (optCache && Date.now() - optTs < OPT_TTL_MS) return optCache;
   if (!notion || !config.notion.dataSourceId) {
-    return optCache ?? { pic: PIC_FALLBACK, handler: HANDLER_FALLBACK };
+    return optCache ?? FALLBACK_OPTS;
   }
   try {
     const ds: any = await (notion as any).dataSources.retrieve({ data_source_id: config.notion.dataSourceId });
-    const names = (prop: string): string[] =>
-      (ds.properties?.[prop]?.multi_select?.options ?? []).map((o: any) => o.name).filter(Boolean);
-    const pic = names('PIC');
-    const handler = names('HANDLER');
-    optCache = { pic: pic.length ? pic : PIC_FALLBACK, handler: handler.length ? handler : HANDLER_FALLBACK };
+    const names = (prop: string, kind: 'multi_select' | 'select'): string[] =>
+      (ds.properties?.[prop]?.[kind]?.options ?? []).map((o: any) => o.name).filter(Boolean);
+    const pic = names('PIC', 'multi_select');
+    const handler = names('HANDLER', 'multi_select');
+    const expenseType = names('EXPENSE TYPE', 'select');
+    optCache = {
+      pic: pic.length ? pic : PIC_FALLBACK,
+      handler: handler.length ? handler : HANDLER_FALLBACK,
+      expenseType: expenseType.length ? expenseType : EXPENSE_TYPE_FALLBACK,
+    };
     optTs = Date.now();
-    logger.info({ pic: optCache.pic, handler: optCache.handler }, 'Notion PIC/HANDLER options synced');
+    logger.info({ pic: optCache.pic, handler: optCache.handler, expenseType: optCache.expenseType }, 'Notion options synced');
     return optCache;
   } catch (err: any) {
-    logger.warn({ err: err?.code ?? err?.message ?? err }, 'PIC/HANDLER option sync failed — using last/fallback');
-    return optCache ?? { pic: PIC_FALLBACK, handler: HANDLER_FALLBACK };
+    logger.warn({ err: err?.code ?? err?.message ?? err }, 'option sync failed — using last/fallback');
+    return optCache ?? FALLBACK_OPTS;
   }
 }
 
@@ -85,7 +93,7 @@ export interface NotionResult {
 
 function buildProperties(
   draft: ExpenseDraft,
-  opts: { pic: string[]; handler: string[] },
+  opts: Options,
 ): { properties: Record<string, unknown>; unmapped: string[] } {
   const unmapped: string[] = [];
   // PIC target = valid wedding PICs that actually exist in the Notion options.
@@ -109,6 +117,13 @@ function buildProperties(
     properties['WEDDING DATE'] = { date: { start: draft.weddingDate } };
   // Supplier bill Ling pays herself → tick the checkbox so she can filter her list.
   if (draft.forLingPayment) properties['For Ling Payment?'] = { checkbox: true };
+
+  // EXPENSE TYPE select (Wedding/Shop/General). Reimbursements have no such option
+  // — they're identified by the REIMBURSED column, so leave it blank for those.
+  if (draft.expenseType !== 'reimbursement') {
+    const etOpt = opts.expenseType.find((o) => o.toLowerCase() === draft.expenseType);
+    if (etOpt) properties['EXPENSE TYPE'] = { select: { name: etOpt } };
+  }
 
   const picRaw = draft.pic ? (PIC_ALIAS[draft.pic.trim().toUpperCase()] ?? draft.pic) : null;
   const pic = mapOption(picRaw, picOptions);

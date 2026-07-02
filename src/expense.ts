@@ -35,6 +35,8 @@ export interface ExpenseDraft {
   location: string | null;
   /** false → leave the wedding fields blank in Notion. */
   isWedding: boolean;
+  /** Maps to the AUTO-LEDGER "EXPENSE TYPE" select (Wedding/Shop/General). */
+  expenseType: 'wedding' | 'shop' | 'general' | 'reimbursement';
   confidence: number;
   /** Things the human should double-check before confirming. */
   warnings: string[];
@@ -142,6 +144,7 @@ export function buildReimbursementDraft(
     handler,
     location: null,
     isWedding: false,
+    expenseType: 'reimbursement',
     confidence: 0.9,
     warnings,
     info: [],
@@ -277,6 +280,7 @@ export function mergeToDraft(
     handler,
     location: note.location,
     isWedding,
+    expenseType: isWedding ? 'wedding' : note.category === 'shop' ? 'shop' : 'general',
     confidence: Math.min(note.confidence, receipt?.confidence ?? 1),
     warnings,
     info: [],

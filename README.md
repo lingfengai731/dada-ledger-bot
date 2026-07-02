@@ -116,6 +116,7 @@ wed <婚期>  pic <名字>  <金额>  <谁付的>  <东西>
   | `PIC`(multi_select) | 婚礼负责人 `LING/JAY/CHRISTI/PUTRI/GENERAL`,别名 `jessica/jesicha→JAY` |
   | `HANDLER`(multi_select) | 付款人/待报销人(`by/tf/trf <名字>`,或报销的收款人) |
   | `For Ling Payment?`(checkbox) | 说明里含 `for ling payment` / `to be paid by ling` 时勾选(供应商账单由 Ling 自付) |
+  | `EXPENSE TYPE`(select) | 机器人按判定自动填 `Wedding` / `Shop` / `General`(报销行留空,靠 REIMBURSED 区分);选项实时同步 |
 
 > 📌 **结构变更(2026-07)**:AUTO-LEDGER 与 INVOICE 已移到共享的 **ADMIN** 空间;数据源 id **未变**,API 仍正常。`Ling Paid Date`(date)由 Ling 付款后**手动**填写,机器人不碰。
 

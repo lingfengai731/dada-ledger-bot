@@ -114,10 +114,11 @@ function displayPerson(raw: string | null): string {
 }
 
 /**
- * A reimbursement — Ling paying a staff member back (boss's spec, 2026-07):
- * staff name in the TITLE ("Reimbursement <name>"), HANDLER is always LING,
- * amount into REIMBURSED (not COST), EXPENSE TYPE = Reimbursement, and the
- * invoice date comes from the transfer image — else the day it was posted.
+ * A reimbursement — Ling paying a staff member back (boss's spec, final):
+ * title "Reimbursement <name>", PIC is always LING (she made the payment),
+ * HANDLER is the staff member being reimbursed, amount into REIMBURSED (not
+ * COST), EXPENSE TYPE = Reimbursement, and the invoice date comes from the
+ * transfer image — else the day it was posted.
  */
 export function buildReimbursementDraft(
   recipientRaw: string | null,
@@ -141,8 +142,8 @@ export function buildReimbursementDraft(
     reimbursed: amount,
     isReimbursement: true,
     forLingPayment: false,
-    pic: null,
-    handler: 'LING', // boss: the handler is always Ling (she pays staff back directly)
+    pic: 'LING', // boss: PIC is always Ling (she made the payment)…
+    handler: who === '???' ? null : who, // …and HANDLER is the staff reimbursed
     location: null,
     isWedding: false,
     expenseType: 'reimbursement',

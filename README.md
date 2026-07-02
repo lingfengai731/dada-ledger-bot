@@ -96,17 +96,15 @@ Shop / General:
 <inv date> gen <amount> <item> by <who paid>
 e.g. 15/6 shop 250.000 vase stock by rania
 
-Reimbursement (Ling paying staff back):
-reimbursement <staff name>  + the transfer screenshot
-e.g. reimbursement putri
-
 Keywords: wed · pic · shop · gen · by · for ling payment
 ```
+
+> 报销格式**不进卡片**(老板:只有 Ling 用,员工不需要);但保留在机器人自我介绍里。
 
 > 机器人的**自我介绍**(进群自动发,`/help` 也会触发)已内置同一模板,英文 + 印尼语双语,见 `src/whatsapp/bot.ts` 的 `INTRO_MESSAGE`。改模板时记得三处同步:群描述卡片、`INTRO_MESSAGE`、解析提示词(`src/agents/messageParser.ts`)。
 - 婚礼单**务必**写 `wed` + `pic`;名字:`Ling / Jay / Christi / Putri`(**Jay = Jessica**)。发票日读不到照片时,开头手写的日期兜底。
 - 照片**带 caption 一条发**最方便;分两条发(照片 + 文字)也能拼上。
-- **报销(Ling 打款给员工)**:`reimbursement <员工名>` + 转账截图(一张截图含多笔也行;纯文字也能记,如 `14/6 reimbursement to putri 50000`)。金额/日期从截图读,截图没日期就用**发进群当天**;HANDLER 恒为 **LING**,金额进 `REIMBURSED`,标题 `REIMBURSEMENT <名字>`,`EXPENSE TYPE=Reimbursement`。
+- **报销(Ling 打款给员工;只有 Ling 用)**:`reimbursement <员工名>` + 转账截图(一张截图含多笔也行;纯文字也能记,如 `14/6 reimbursement to putri 50000`)。金额/日期从截图读,截图没日期就用**发进群当天**;**PIC 恒为 LING、HANDLER=被报销的员工**,金额进 `REIMBURSED`,标题 `REIMBURSEMENT <名字>`,`EXPENSE TYPE=Reimbursement`。
 - **发错了怎么删**:引用发错的原消息(或机器人的确认摘要),回一句含 `cancel` 的话(如 `cancel unsaved expenses`)即可只删那一笔;单发 `cancel` 是取消你名下全部待确认。
 - **改金额**:直接回一个**纯数字**(如 `1.132.500`)= 修正当前显示那笔的金额,不会被当成新账。
 
@@ -160,7 +158,7 @@ Keywords: wed · pic · shop · gen · by · for ling payment
 > 📌 **结构变更(2026-07)**:AUTO-LEDGER 与 INVOICE 已移到共享的 **ADMIN** 空间;数据源 id **未变**,API 仍正常。`Ling Paid Date`(date)由 Ling 付款后**手动**填写,机器人不碰。
 
 - **收据原图**:写入成功后,把收据照片/PDF 作为图片/PDF 块**附到该 Notion 行的页面正文**(best-effort,失败不影响存账;开关 `NOTION_ATTACH_RECEIPTS`)。
-- **报销约定**(老板 2026-07 定版):标题 `REIMBURSEMENT <员工名>`、`HANDLER` 恒为 **LING**、金额进 `REIMBURSED`、`EXPENSE TYPE=Reimbursement`、发票日取截图日期(没有则取发进群当天)。
+- **报销约定**(老板 2026-07 定版):标题 `REIMBURSEMENT <员工名>`、**`PIC` 恒为 LING、`HANDLER` = 被报销的员工**、金额进 `REIMBURSED`、`EXPENSE TYPE=Reimbursement`、发票日取截图日期(没有则取发进群当天)。保存回执只说 `✅ Saved to Notion.`(不带数量)。
 - **保证**:婚礼行不会再带空的 `WEDDING DATE` 或 `PIC`(被拦截规则挡住)。
 - `preview` 模式只打印不写;`live` 模式真正创建行。由 `.env` 的 `NOTION_WRITE` 控制。
 
@@ -325,7 +323,7 @@ pm2 restart dada-bot
 | 12 | 补缺 | 缺 PIC 时回 `christi` | 所有缺 PIC 的行补上(已有的不动) |
 | 13 | 缺必填拦截 | 婚礼单不写 wed/pic | 显示 `???`;回 `ok` 拒绝保存 |
 | 14 | 确认/取消/撤销 | `ok` / `cancel` / `/undo` | 保存全部 / 丢弃 / 撤销上一笔并归档 Notion 行 |
-| 15 | 报销(截图) | 转账截图 + `reimbursement putri` | 💸 报销确认;金额/日期从截图读;Notion:标题 `REIMBURSEMENT PUTRI`、HANDLER=LING、`EXPENSE TYPE=Reimbursement` |
+| 15 | 报销(截图) | 转账截图 + `reimbursement putri` | 💸 报销确认;金额/日期从截图读;Notion:标题 `REIMBURSEMENT PUTRI`、**PIC=LING、HANDLER=PUTRI**、`EXPENSE TYPE=Reimbursement` |
 | 15b | 报销(纯文字) | `14/6 reimbursement to putri 50000` | 同上,金额/日期取自文字(没日期用当天) |
 | 15c | 纯数字改金额 | 对着确认回 `1.132.500` | 修正那笔的金额(不是新账) |
 | 15d | 引用删单 | 引用发错的消息回 `cancel unsaved expenses` | 只删那一笔待确认 |

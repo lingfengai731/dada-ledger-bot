@@ -904,9 +904,9 @@ async function commitPendings(msg: WAMessage, pendings: Pending[]): Promise<void
 
   const out: string[] = [];
   if (savedCount > 0) {
-    out.push(savedToNotion > 0
-      ? `✅ Saved ${savedCount} expense${savedCount > 1 ? 's' : ''} to Notion.`
-      : `✅ Recorded ${savedCount} expense${savedCount > 1 ? 's' : ''}. _(Notion preview mode — not written yet.)_`);
+    // Boss: keep it to a plain "Saved" — no count (a bare "ok" may commit several
+    // open drafts at once, and the number read as a mystery running total).
+    out.push(savedToNotion > 0 ? '✅ Saved to Notion.' : '✅ Recorded. _(Notion preview mode — not written yet.)_');
   }
   if (blockedLines.length) {
     out.push('🚫 *Not saved yet — missing required info:*', ...blockedLines,
@@ -1073,7 +1073,8 @@ function renderOne(draft: ExpenseDraft): string {
       `*Reimbursed to:* ${draft.description ?? '???'}`,
       `*Amount:* ${formatMoney(draft.reimbursed)} ${config.currency} _(→ REIMBURSED)_`,
       `*Invoice date:* ${draft.invoiceDate ?? '—'}`,
-      `*Handler:* ${draft.handler ?? 'LING'}`,
+      `*PIC:* ${draft.pic ?? 'LING'}`,
+      `*Handler:* ${draft.handler ?? '???'}`,
     ];
     if (draft.info.length) lines.push('', 'ℹ️ ' + draft.info.join('\nℹ️ '));
     if (draft.warnings.length) lines.push('', '⚠️ ' + draft.warnings.join('\n⚠️ '));

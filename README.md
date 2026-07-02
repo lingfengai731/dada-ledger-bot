@@ -274,7 +274,40 @@ pm2 restart dada-bot
 
 ---
 
-## 九、数据 & 隐私
+## 九、功能验收测试(部署后在测试群跑一遍)
+
+> 用**非机器人账号**发(机器人忽略自己账号的消息)。只发文字时要等 ~20 秒收集窗 + 解析 ~15 秒,总共 30-40 秒回复是正常的。EXPENSE TYPE / For Ling Payment 的**落库结果**要去 Notion AUTO-LEDGER 看列值,群里只显示类型标题。
+
+| # | 功能 | 你发什么 | 预期 |
+|---|---|---|---|
+| 1 | 婚礼(标准格式) | `15/6 wed 16/6 pic christi 1.500.000 bunga mitir by putu` | 标题 _confirm this **WEDDING** expense_;6 字段全对;Notion `EXPENSE TYPE=Wedding` |
+| 2 | Shop | `15/6 shop 250.000 vase stock by rania` | 标题 **SHOP**;婚期/PIC 为 `—`;Notion `EXPENSE TYPE=Shop` |
+| 3 | Gen | `15/6 gen 80.000 office snacks by putu` | 标题 **GENERAL**;Notion `EXPENSE TYPE=General` |
+| 4 | Ling 自付 | `15/6 gen 6.500.000 anggrek supplier bill for ling payment` | 显示 `💰 For Ling to pay: yes`;`ok` 后 Notion `For Ling Payment?` 打勾 |
+| 5 | 打字金额优先 | 转账截图(含手续费)+ 文字金额写含费总额 | **用打字金额**;差额出 ⚠️ `using your typed amount` |
+| 6 | 图+文一条发 | 收据照片,caption 写 #1 那行 | ~3 秒快速回,拼成一笔 |
+| 7 | 图文分开 | 先发照片,10 秒内再发文字(顺序随意) | 拼成一笔 |
+| 8 | 引用照片 | 发照片→隔一会→**引用**它发文字 | 拼进那张照片,不重复记账 |
+| 9 | 只发图 | 只发收据照片 | 从图读金额/日期出确认 |
+| 10 | 连发多笔 | 一条消息贴 3-15 行 | **一条编号列表**(每行带类型),无 TOTAL |
+| 11 | 按行纠错 | 对列表回 `1. 130000` / `3. christi` | 只改那一行,重发摘要 |
+| 12 | 补缺 | 缺 PIC 时回 `christi` | 所有缺 PIC 的行补上(已有的不动) |
+| 13 | 缺必填拦截 | 婚礼单不写 wed/pic | 显示 `???`;回 `ok` 拒绝保存 |
+| 14 | 确认/取消/撤销 | `ok` / `cancel` / `/undo` | 保存全部 / 丢弃 / 撤销上一笔并归档 Notion 行 |
+| 15 | 报销 | 转账截图 + `Reimbursement christi` | 💸 报销确认;金额进 `REIMBURSED`;标题 `REIMBURSEMENT` |
+| 16 | 重复防呆 | 同一笔发两遍 | 第二遍 ⚠️ 疑似重复 |
+| 17 | 忽略闲聊 | 有待确认时发闲聊 | 不回应、不刷屏 |
+| 18 | 命令 | `/help` `/total` `/ask 这个月花了多少` `/iam putu` | 各自正确回复 |
+| 19 | 30 分钟提醒 | 不回 `ok` 等 30-45 分钟 | @发件人,引用原摘要,一次 |
+| 20 | 8 小时自动存 | 信息齐全不回 `ok` 放 8 小时 | 自动写入并在群里通告(信息不全则提醒) |
+| 21 | 每晚老板总结 | `/pushsummary today` 模拟 | 私发 Ling 当日明细 + TOTAL |
+| 22 | 日程表纠错 | 婚期写错但场地在日程表上 | ℹ️ `Wedding date adjusted to <日期> at <场地>. Correct me if wrong.` |
+
+> 建议顺序:1-5(本轮新行为)→ 10-14(批量+纠错)→ 其余抽查;19/20 挂着等即可。
+
+---
+
+## 十、数据 & 隐私
 
 - 本地账本镜像:`data/ledger.db`;收据图片:`data/images/`
 - 婚礼日程表快照:`data/wedding-schedule.csv`(公司私有,**不进 git**)

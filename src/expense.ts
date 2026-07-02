@@ -197,27 +197,40 @@ function sigWords(s: string): string[] {
   return s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
 }
 
+// Boss: a summary read off an invoice must stay short — cap the title at 7 words.
+const TITLE_MAX_WORDS = 7;
+
+function capWords(s: string, max = TITLE_MAX_WORDS): string {
+  const words = s.split(/\s+/).filter(Boolean);
+  return words.length <= max ? s : words.slice(0, max).join(' ');
+}
+
 /**
  * Combine vendor + description into the title, but keep it SHORT (boss's ask):
  * if the note's description already references the receipt vendor (overlapping
  * words, e.g. vendor "Lion Parcel Surabaya" and desc "...to Lion Parcel"), keep
- * just the description. Only join both when each adds new information.
+ * just the description. Only join both when each adds new information. The
+ * result is capped at TITLE_MAX_WORDS words (long invoice item lists get cut).
  */
 export function combineVendorDescription(vendor: string | null, description: string | null): string | null {
   const v = (vendor ?? '').trim();
   const d = (description ?? '').trim();
-  if (!v) return d || null;
-  if (!d) return v || null;
-  if (v.toLowerCase() === d.toLowerCase()) return d;
+  if (!v) return d ? capWords(d) : null;
+  if (!d) return v ? capWords(v) : null;
+  if (v.toLowerCase() === d.toLowerCase()) return capWords(d);
   // If half-or-more of the vendor's significant words already appear in the
   // description, the vendor is redundant — drop it.
   const vw = sigWords(v);
   if (vw.length) {
     const dw = new Set(sigWords(d));
     const overlap = vw.filter((w) => dw.has(w)).length;
-    if (overlap / vw.length >= 0.5) return d;
+    if (overlap / vw.length >= 0.5) return capWords(d);
   }
-  return `${v}, ${d}`;
+  // Joining both: if over budget, shorten the VENDOR (keep a 2-word handle) so the
+  // item words — the part that says what was bought — survive the cap.
+  const joined = `${v}, ${d}`;
+  if (joined.split(/\s+/).length <= TITLE_MAX_WORDS) return joined;
+  return capWords(`${capWords(v, 2).replace(/,$/, '')}, ${d}`);
 }
 
 /** Recompute the combined title after vendor/description change (e.g. a correction). */

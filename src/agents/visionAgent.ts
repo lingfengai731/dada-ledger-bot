@@ -29,6 +29,8 @@ IMPORTANT: one photo may contain MULTIPLE separate receipts (often two side by s
 Return one object per distinct receipt.
 
 If something is illegible, set that field to null and explain in "notes". Never invent numbers.
+Keep "vendor" and item "name"s SHORT — a recognisable name, not the invoice's full
+legal/branch text (e.g. "Toko Zil" not "TOKO ZIL-OIL CABANG DENPASAR BARAT PT"). Max ~5 words each.
 Give an honest "confidence" between 0 and 1 for each receipt.`;
 
 const INSTRUCTION = `Extract every receipt/invoice visible in this file (it may be a photo or a PDF invoice).

@@ -1155,7 +1155,8 @@ function stripKeyword(body: string): string {
 async function handleCommand(msg: WAMessage, body: string): Promise<void> {
   const [cmd, ...rest] = body.slice(1).split(/\s+/);
   const arg = rest.join(' ').trim();
-  if (cmd === 'help') await reply(msg, INTRO_MESSAGE);
+  // /help, /intro, or a bare "/" all re-post the intro + templates (boss's ask).
+  if (cmd === 'help' || cmd === 'intro' || cmd === '') await reply(msg, INTRO_MESSAGE);
   else if (cmd === 'total') await reply(msg, await answerQuestion('What is the total spend this month?'));
   else if (cmd === 'ask' || cmd === 'q') await reply(msg, arg ? await answerQuestion(arg) : 'Usage: /ask <your question>');
   else if (cmd === 'summary') await reply(msg, buildPeriodSummary(arg === 'month' ? 30 : 7));

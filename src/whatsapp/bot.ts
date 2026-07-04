@@ -254,7 +254,18 @@ export function createBot() {
   // Heartbeat: every 5 min log the connection state, and (if HEALTHCHECK_URL is
   // set) ping it while connected so an external monitor alerts if pings stop —
   // this works even when WhatsApp/the server is down, which in-app alerts can't.
+  // Self-heal: the headless-Chrome session can crash while the Node process stays
+  // alive — getState() then throws, which we record as "UNREACHABLE". WhatsApp still
+  // lists the device as linked, so nothing looks wrong from the phone, but the bot
+  // silently stops handling messages and pm2 won't restart a process that hasn't
+  // exited. After HEAL_AFTER_UNREACHABLE consecutive UNREACHABLE checks we exit(1) on
+  // purpose so pm2 relaunches us; the LocalAuth session is intact, so it reconnects
+  // WITHOUT a re-scan. We self-heal ONLY on UNREACHABLE (a crashed page a restart
+  // fixes) — never on a genuine disconnect/unpaired state, where a restart would just
+  // loop on the QR (and hammering re-links is itself a ban signal).
+  const HEAL_AFTER = Math.max(1, Number(process.env.HEAL_AFTER_UNREACHABLE ?? 3));
   let lastHealthy = true;
+  let unreachableStreak = 0;
   const heartbeat = setInterval(async () => {
     let state = 'UNKNOWN';
     try {
@@ -263,6 +274,10 @@ export function createBot() {
       state = 'UNREACHABLE';
     }
     const healthy = state === 'CONNECTED';
+    // Only the crashed-page case counts toward self-heal; any other definite state
+    // (CONNECTED, UNPAIRED, …) resets the streak.
+    unreachableStreak = state === 'UNREACHABLE' ? unreachableStreak + 1 : 0;
+
     if (healthy) {
       if (config.healthcheckUrl) {
         try {
@@ -284,7 +299,15 @@ export function createBot() {
         logger.info('WhatsApp recovered — boss notified');
       }
     } else {
-      logger.error({ state }, '🚨 WhatsApp not connected');
+      logger.error({ state, unreachableStreak }, '🚨 WhatsApp not connected');
+      if (unreachableStreak >= HEAL_AFTER) {
+        logger.error(
+          { unreachableStreak, healAfter: HEAL_AFTER },
+          `🔁 session unreachable ${unreachableStreak}× — exiting so pm2 restarts & reconnects (LocalAuth intact, no re-scan)`,
+        );
+        // Let pino flush, then exit non-zero so pm2 relaunches the process.
+        setTimeout(() => process.exit(1), 500);
+      }
     }
     lastHealthy = healthy;
   }, 5 * 60 * 1000);

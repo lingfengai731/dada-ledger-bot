@@ -195,6 +195,10 @@ BOSS_WHATSAPP_ID=6281246337205
 SUMMARY_CADENCE=daily                         # daily=每天 / weekly / monthly
 SUMMARY_HOUR=22                               # 巴厘时间几点发
 
+# 监控 / 自愈
+HEALTHCHECK_URL=https://hc-ping.com/xxxx      # 连着就每 5 分钟 ping 一次;停 ping = healthchecks.io 报 down
+HEAL_AFTER_UNREACHABLE=3                       # 会话崩(getState 抛错)连续 N 次(每次隔 5 分钟)就自动 exit,让 pm2 拉起重连(不用扫码);默认 3=约 15 分钟
+
 PROXY_URL=http://127.0.0.1:7890   # 仅中国大陆本地需要(Node 不走系统代理);服务器留空
 ```
 

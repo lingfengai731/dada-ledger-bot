@@ -262,6 +262,61 @@ pm2 logs dada-bot --raw                        # 等日志刷出 8 位配对码(
 
 > ⚠️ 配对码几分钟内有效;过期或没出来就 `pm2 restart dada-bot` 再看一次。**只连一次**,别反复试(WhatsApp 会因频繁连接临时限制账号)。`.env` 里 `WA_PAIR_NUMBER` 加过一次后就别重复 `echo` 了。
 
+### 浏览器扫码远程重连(配对码失效时的可靠兜底)★
+
+配对码**经常出不来**:启动时 puppeteer 常报 `Failed to add page binding … already exists`,页面一崩,`requestPairingCode` 就拿不到执行上下文 → 退回二维码;而 noVNC 终端里的 ASCII 二维码手机又扫不动。这时用这招——**服务器把二维码发布成网页,用自己电脑浏览器打开、手机扫屏幕**,实测最稳。代码已在每次二维码刷新时把原始串写到 `data/last-qr.txt`(见 `bot.ts` 的 `qr` 事件),这里就是把它渲染成清晰大图对外发布。
+
+**一次性准备**(装一次即可):
+
+```bash
+apt install -y qrencode
+ufw allow 8080            # 若服务器用 ufw;另去 Vultr 后台 Firewall 也放行 TCP 8080
+```
+
+**每次掉线重连(0→1;背景任务上次 kill 了没关系,每次重新起):**
+
+1. 干净重启——消除 puppeteer 崩溃、让它重新刷二维码:
+
+```bash
+cd /opt/dada-ledger-bot
+pm2 stop dada-bot
+pkill -f chrome; pkill -f puppeteer     # 杀掉残留 headless Chrome(崩溃根源)
+rm -rf .wwebjs_cache                     # 只删网页版缓存,安全;专治 "already exists"
+pm2 restart dada-bot
+```
+
+2. 确认在刷二维码(`last-qr.txt` 由机器人每次刷新时写):
+
+```bash
+ls -l data/last-qr.txt                   # 有内容即可(pm2 logs 看一眼也行,Ctrl+C 退出不停机器人)
+```
+
+3. 把二维码发布成网页(循环让图片一直保持最新——二维码 ~20 秒换一次):
+
+```bash
+while true; do qrencode -s 10 -r /opt/dada-ledger-bot/data/last-qr.txt -o /tmp/wa.png 2>/dev/null; sleep 2; done &
+cd /tmp && python3 -m http.server 8080
+```
+
+4. 在**自己电脑浏览器**打开(注意**不要**带尖括号):
+
+   ```
+   http://207.148.68.180:8080/wa.png
+   ```
+
+   刷新一下页面拿最新码 → 机器人手机 WhatsApp → 已链接的设备 → 链接设备 → 对着电脑屏幕扫。
+
+5. 看到 `WhatsApp client ready ✅` 即成功,清理:
+
+```bash
+#（在跑 http.server 的那个终端）按 Ctrl+C 停掉网页服务
+kill %1          # 停掉刷二维码的后台循环(%1 = 本终端第一个后台任务)
+```
+
+> ⚠️ 二维码约 20-30 秒换一次;手机提示失效就**刷新浏览器**再扫(循环已在后台持续更新图片)。
+> `http.server` 必须一直开着才有网页;`pm2 logs` 只是"看日志",关掉它不影响机器人后台运行——只有 `pm2 stop/restart/delete` 才动机器人。
+> 打不开网页(转圈/超时):多半是 8080 被防火墙挡了,回去做"一次性准备"里的放行;并确认 `http.server` 还开着、`/tmp/wa.png` 已生成(`ls -l /tmp/wa.png`)。
+
 ### 正式上线 / 切群
 
 1. 让管理员把 **DADA_BOT** 拉进目标群(进群后机器人会自动发中/英/印尼三语自我介绍;若漏发,群里打 `/help` 即可)。
@@ -300,7 +355,7 @@ pm2 restart dada-bot
 | 老板总结 | **每晚明细账单**(分支出/报销 + 当日 TOTAL)私发 Ling |
 | 问答/命令 | `/ask` `/total` `/summary` `/owed` `/iam` `/pushsummary` `/undo` `/help`;入群三语自我介绍 |
 | 防呆 | 金额异常(疑似漏千分位)/ 糊图 / 疑似重复 ⚠️ 提醒 |
-| 运维 | 部署 VPS,7×24 在线(pm2);**手机号配对码**(`WA_PAIR_NUMBER`)远程连号,免扫码 |
+| 运维 | 部署 VPS,7×24 在线(pm2);远程重连两法:**手机号配对码**(`WA_PAIR_NUMBER`)/ **浏览器扫码**(服务器发布 `last-qr.txt` 成网页,电脑打开手机扫,见第七节★) |
 
 ### ⬜ 没做 / 评估中
 

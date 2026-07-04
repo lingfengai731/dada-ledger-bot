@@ -28,6 +28,11 @@ export const config = {
     dataSourceId: process.env.NOTION_DATA_SOURCE_ID ?? '',
     /** The "WEDDING SCHEDULE" data source id to READ (enrich missing date/PIC/venue). Empty = CSV only. */
     weddingDataSourceId: process.env.NOTION_WEDDING_DATA_SOURCE_ID ?? '',
+    /** Name of the relation column on EXPENSES that links a row to its wedding on
+     *  the WEDDING SCHEDULE (boss added it for per-project rollups). The bot fills
+     *  it automatically when it can resolve the wedding's page id (needs the live
+     *  Notion schedule read). Set empty to disable. */
+    weddingRelationProp: process.env.NOTION_WEDDING_RELATION_PROP ?? 'WEDDING',
     /** 'preview' = log the row but DON'T write; 'live' = actually create the Notion row. */
     writeMode: (process.env.NOTION_WRITE ?? 'preview') as 'preview' | 'live',
     /** Attach the receipt photo/PDF into the created Notion page body (best-effort).

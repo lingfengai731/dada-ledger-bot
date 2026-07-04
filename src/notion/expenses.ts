@@ -4,6 +4,7 @@ import { Client } from '@notionhq/client';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
 import { proxyFetch } from '../bootstrap.js';
+import { lookupSchedule } from '../schedule/weddingSchedule.js';
 import type { ExpenseDraft } from '../expense.js';
 
 /**
@@ -188,10 +189,31 @@ export async function archiveExpense(pageId: string): Promise<boolean> {
   }
 }
 
+/**
+ * Best-effort: fill the EXPENSES→WEDDING relation so Notion can roll up total
+ * spend per wedding (boss added the column). Needs the wedding's Notion page id,
+ * which only exists when the schedule is read LIVE — with the CSV snapshot the
+ * lookup returns no pageId and we simply skip (row still saves). Never throws.
+ */
+function addWeddingRelation(draft: ExpenseDraft, properties: Record<string, unknown>): void {
+  const prop = config.notion.weddingRelationProp;
+  if (!prop || draft.isReimbursement || !draft.isWedding || !draft.weddingDate) return;
+  try {
+    const match = lookupSchedule({ weddingDate: draft.weddingDate, picHint: draft.pic ?? null });
+    if (match?.pageId) {
+      properties[prop] = { relation: [{ id: match.pageId }] };
+      logger.info({ prop, weddingPageId: match.pageId }, 'linked expense → wedding schedule');
+    }
+  } catch (err: any) {
+    logger.warn({ err: err?.message ?? err }, 'wedding relation lookup failed (row still saved)');
+  }
+}
+
 /** Create (or preview) a Notion EXPENSES row from a confirmed draft. */
 export async function writeExpense(draft: ExpenseDraft): Promise<NotionResult> {
   const opts = await getOptions();
   const { properties, unmapped } = buildProperties(draft, opts);
+  addWeddingRelation(draft, properties);
 
   const shouldWrite =
     config.notion.writeMode === 'live' && notion && config.notion.dataSourceId;

@@ -164,6 +164,7 @@ cancel / cancel all — discard instead
 
 > 📌 **结构变更(2026-07)**:AUTO-LEDGER 与 INVOICE 已移到共享的 **ADMIN** 空间;数据源 id **未变**,API 仍正常。`Ling Paid Date`(date)由 Ling 付款后**手动**填写,机器人不碰。
 
+- **婚礼关系列自动连(2026-07)**:婚礼支出写入时,`WEDDING` 关系列会**自动**连到 WEDDING SCHEDULE 里"同婚期(+PIC 消歧)"的那场婚礼——Notion 里就能按项目 rollup 汇总总花费(老板加的列)。前提是婚礼日程表能**实时读**到婚礼页 id(`NOTION_WEDDING_DATA_SOURCE_ID` 已配 + 页面分享给集成);CSV 快照没有 page id 则跳过。列名用 `NOTION_WEDDING_RELATION_PROP` 配(默认 `WEDDING`,留空关闭),best-effort,连不上不影响存账。
 - **收据原图**:写入成功后,把收据照片/PDF 作为图片/PDF 块**附到该 Notion 行的页面正文**(best-effort,失败不影响存账;开关 `NOTION_ATTACH_RECEIPTS`)。
 - **报销约定**(老板 2026-07 定版):标题 `REIMBURSEMENT <员工名>`、**`PIC` 恒为 LING、`HANDLER` = 被报销的员工**、金额进 `REIMBURSED`、`EXPENSE TYPE=Reimbursement`、发票日取截图日期(没有则取发进群当天)。保存回执只说 `✅ Saved to Notion.`(不带数量)。
 - **保证**:婚礼行不会再带空的 `WEDDING DATE` 或 `PIC`(被拦截规则挡住)。
@@ -187,6 +188,7 @@ DRY_RUN=false                                # true=只读不发(本地调试用
 NOTION_API_KEY=ntn_...
 NOTION_DATA_SOURCE_ID=cec25f1b-255a-8390-b86b-076832d4f087   # AUTO-LEDGER / EXPENSES 2026
 NOTION_WEDDING_DATA_SOURCE_ID=27925f1b-255a-80d9-9c31-000ba1bdd7bf  # WEDDING SCHEDULE(实时读)
+NOTION_WEDDING_RELATION_PROP=WEDDING          # EXPENSES 上"关联到婚礼"的关系列名;自动回填(需实时读到婚礼页 id);留空关闭
 NOTION_WRITE=live                            # live=真写入;preview=只预览
 NOTION_ATTACH_RECEIPTS=true                  # 把收据原图附到 Notion 行(默认开)
 

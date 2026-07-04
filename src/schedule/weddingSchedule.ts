@@ -25,6 +25,9 @@ export interface ScheduleEntry {
   weddingDate: string; // ISO start date
   weddingEnd: string | null;
   status: string;
+  /** Notion page id of this wedding (only when loaded LIVE — CSV rows have none).
+   *  Needed to fill the EXPENSES→WEDDING relation column. */
+  pageId: string | null;
 }
 
 export interface ScheduleMatch {
@@ -38,6 +41,8 @@ export interface ScheduleMatch {
   confidence: number;
   /** Other plausible weddings (for the human to disambiguate). */
   alternatives: ScheduleEntry[];
+  /** Notion page id of the matched wedding (null unless the schedule is live). */
+  pageId: string | null;
 }
 
 // Map the schedule's free-text PIC names onto the EXPENSES PIC options.
@@ -140,6 +145,7 @@ function loadFromCsv(): ScheduleEntry[] {
           weddingDate: date.start,
           weddingEnd: date.end,
           status: (cells[iStatus] ?? '').trim(),
+          pageId: null, // CSV snapshot has no Notion page id
         });
       }
       logger.info({ count: entries.length, file }, 'wedding schedule loaded from CSV');
@@ -199,6 +205,7 @@ export async function refreshFromNotion(): Promise<boolean> {
           weddingDate: date.start.slice(0, 10),
           weddingEnd: date.end ? date.end.slice(0, 10) : null,
           status: p['Status']?.status?.name ?? '',
+          pageId: page.id ?? null, // live read → keep the page id for the relation link
         });
       }
       cursor = res.has_more ? res.next_cursor : undefined;
@@ -326,6 +333,7 @@ export function lookupSchedule(opts: {
         via: 'date',
         confidence: pool.length === 1 ? 0.95 : 0.7,
         alternatives: pool.slice(1),
+        pageId: best.pageId,
       };
     }
   }
@@ -370,6 +378,7 @@ export function lookupSchedule(opts: {
         via,
         confidence,
         alternatives: cands.filter((e) => e !== best).slice(0, 4),
+        pageId: best.pageId,
       };
     }
   }
@@ -391,6 +400,7 @@ export function lookupSchedule(opts: {
           via: 'client',
           confidence: cands.length === 1 ? 0.7 : 0.4,
           alternatives: cands.slice(1, 5),
+          pageId: best.pageId,
         };
       }
     }

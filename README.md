@@ -184,6 +184,7 @@ WHATSAPP_GROUP_ID=120363426839508686@g.us   # 测试群;上线改成真实 DADA 
 WA_PAIR_NUMBER=8613078287710                 # 机器人自己的号;设了就能用"手机号配对码"远程连号(免扫二维码)
 TRIGGER_MODE=auto                            # 报账专用群:任意收据/金额/日期都视为提交
 DRY_RUN=false                                # true=只读不发(本地调试用)
+HUMANIZE_REPLIES=true                         # 回复前标记已读+显示"正在输入…"+随机等几秒(≤6s),更像真人降低封号指纹;只改时机,不改内容/不影响准确率;false 关闭
 
 NOTION_API_KEY=ntn_...
 NOTION_DATA_SOURCE_ID=cec25f1b-255a-8390-b86b-076832d4f087   # AUTO-LEDGER / EXPENSES 2026

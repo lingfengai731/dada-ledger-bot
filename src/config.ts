@@ -62,6 +62,11 @@ export const config = {
     hour: Number(process.env.SUMMARY_HOUR ?? '9'),
   },
   dryRun: bool(process.env.DRY_RUN, true),
+  /** Humanize outgoing group replies: mark the chat seen, show "typing…", and wait
+   *  a short randomized, length-scaled beat before sending — so the bot looks less
+   *  like instant-reply automation (a ban signal). Timing/presence ONLY; never
+   *  touches parsing, so accuracy is unaffected. Off with HUMANIZE_REPLIES=false. */
+  humanizeReplies: bool(process.env.HUMANIZE_REPLIES, true),
   currency: process.env.CURRENCY ?? 'IDR',
   locale: process.env.LOCALE ?? 'id-ID',
   paths: {

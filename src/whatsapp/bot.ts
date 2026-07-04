@@ -1039,11 +1039,35 @@ async function sweepPending(): Promise<void> {
   }
 }
 
+/** A short, randomized, length-scaled "typing" beat (ms) — makes replies look
+ *  human rather than instant. Capped so it doesn't undo the speed pass. */
+function humanDelayMs(text: string): number {
+  const raw = (1200 + Math.min(text.length, 300) * 20) * (0.7 + Math.random() * 0.6);
+  return Math.round(Math.min(raw, 6000));
+}
+
+/** Before sending a group message: mark seen + show "typing…" + pause a human
+ *  beat. Best-effort presence only — never throws, never affects parsing. The
+ *  send itself clears the typing state. Skip entirely when HUMANIZE_REPLIES=false. */
+async function humanizeBefore(chat: WAChat | null | undefined, text: string): Promise<void> {
+  if (!config.humanizeReplies || !chat) return;
+  try {
+    await chat.sendSeen();
+    await chat.sendStateTyping();
+    await new Promise((r) => setTimeout(r, humanDelayMs(text)));
+  } catch {
+    /* presence is cosmetic — ignore and just send */
+  }
+}
+
 /** Send to a chat (respecting dry-run), logging a preview when dry. */
 async function sendToChat(chatId: string, text: string, previewLabel: string, opts?: object): Promise<void> {
   try {
-    if (!config.dryRun) await waClient?.sendMessage(chatId, text, opts as any);
-    else logger.info(`\n${previewLabel}\n` + text);
+    if (!config.dryRun) {
+      const chat = waClient ? await waClient.getChatById(chatId).catch(() => null) : null;
+      await humanizeBefore(chat, text);
+      await waClient?.sendMessage(chatId, text, opts as any);
+    } else logger.info(`\n${previewLabel}\n` + text);
   } catch (err) {
     logger.error({ err, chatId }, 'sendToChat failed');
   }
@@ -1237,6 +1261,7 @@ async function reply(msg: WAMessage, text: string, mentions?: string[]): Promise
     logger.info('\n[reply preview]\n' + text);
     return null;
   }
+  await humanizeBefore(await msg.getChat().catch(() => null), text);
   return await msg.reply(text, undefined, mentions?.length ? { mentions } : undefined);
 }
 

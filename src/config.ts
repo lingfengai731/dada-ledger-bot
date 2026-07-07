@@ -67,6 +67,12 @@ export const config = {
    *  like instant-reply automation (a ban signal). Timing/presence ONLY; never
    *  touches parsing, so accuracy is unaffected. Off with HUMANIZE_REPLIES=false. */
   humanizeReplies: bool(process.env.HUMANIZE_REPLIES, true),
+  /** Acknowledge a save with a lightweight ✅ reaction on the staff's original
+   *  submission instead of posting a separate "Saved to Notion" message — fewer
+   *  bot messages = smaller automation footprint (and the 👍-confirm the boss
+   *  liked). Falls back to the text message if the reaction can't be placed or in
+   *  preview mode. Off with CONFIRM_WITH_REACTION=false. */
+  confirmWithReaction: bool(process.env.CONFIRM_WITH_REACTION, true),
   currency: process.env.CURRENCY ?? 'IDR',
   locale: process.env.LOCALE ?? 'id-ID',
   paths: {

@@ -297,17 +297,16 @@ pm2 restart dada-bot
 ls -l data/last-qr.txt                   # 有内容即可(pm2 logs 看一眼也行,Ctrl+C 退出不停机器人)
 ```
 
-3. 把二维码发布成网页(循环让图片一直保持最新——二维码 ~20 秒换一次):
+3. 一条命令把二维码发布成网页(脚本会循环更新图片——二维码 ~20 秒换一次):
 
 ```bash
-while true; do qrencode -s 10 -r /opt/dada-ledger-bot/data/last-qr.txt -o /tmp/wa.png 2>/dev/null; sleep 2; done &
-cd /tmp && python3 -m http.server 8080
+./ops/relink-qr.sh
 ```
 
 4. 在**自己电脑浏览器**打开(注意**不要**带尖括号):
 
    ```
-   http://207.148.68.180:8080/wa.png
+   http://207.148.68.180:8080/
    ```
 
    刷新一下页面拿最新码 → 机器人手机 WhatsApp → 已链接的设备 → 链接设备 → 对着电脑屏幕扫。
@@ -315,13 +314,12 @@ cd /tmp && python3 -m http.server 8080
 5. 看到 `WhatsApp client ready ✅` 即成功,清理:
 
 ```bash
-#（在跑 http.server 的那个终端）按 Ctrl+C 停掉网页服务
-kill %1          # 停掉刷二维码的后台循环(%1 = 本终端第一个后台任务)
+# 在跑 ./ops/relink-qr.sh 的那个终端按 Ctrl+C
 ```
 
-> ⚠️ 二维码约 20-30 秒换一次;手机提示失效就**刷新浏览器**再扫(循环已在后台持续更新图片)。
-> `http.server` 必须一直开着才有网页;`pm2 logs` 只是"看日志",关掉它不影响机器人后台运行——只有 `pm2 stop/restart/delete` 才动机器人。
-> 打不开网页(转圈/超时):多半是 8080 被防火墙挡了,回去做"一次性准备"里的放行;并确认 `http.server` 还开着、`/tmp/wa.png` 已生成(`ls -l /tmp/wa.png`)。
+> ⚠️ 二维码约 20-30 秒换一次;手机提示失效就**刷新浏览器**再扫(脚本会持续更新图片)。
+> `./ops/relink-qr.sh` 必须一直开着才有网页;`pm2 logs` 只是"看日志",关掉它不影响机器人后台运行——只有 `pm2 stop/restart/delete` 才动机器人。
+> 打不开网页(转圈/超时):多半是 8080 被防火墙挡了,回去做"一次性准备"里的放行;也可临时换端口:`PORT=8081 ./ops/relink-qr.sh`。
 
 ### 正式上线 / 切群
 

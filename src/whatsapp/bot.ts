@@ -945,14 +945,7 @@ async function commitPendings(msg: WAMessage, pendings: Pending[]): Promise<void
     // so it's unambiguous which entry was recorded (tap to jump back to it).
     const text = savedToNotion > 0 ? '✅ Saved to Notion.' : '✅ Recorded. _(Notion preview mode — not written yet.)_';
     for (const p of savedPendings) {
-      // Prefer a lightweight ✅ reaction on the original submission over a whole
-      // new message (fewer bot messages = smaller automation footprint). Fall
-      // back to the text receipt in preview mode or if the reaction won't stick.
-      const reacted =
-        config.confirmWithReaction && savedToNotion > 0 && (await reactToMessage(p.waMessageId, '✅'));
-      if (!reacted) {
-        await sendToChat(p.chatId, text, '[saved receipt preview]', { quotedMessageId: p.waMessageId });
-      }
+      await sendToChat(p.chatId, text, '[saved receipt preview]', { quotedMessageId: p.waMessageId });
     }
   }
   if (blockedLines.length) {
@@ -1064,22 +1057,6 @@ async function humanizeBefore(chat: WAChat | null | undefined, text: string): Pr
     await new Promise((r) => setTimeout(r, humanDelayMs(text)));
   } catch {
     /* presence is cosmetic — ignore and just send */
-  }
-}
-
-/** React to a message by id with an emoji (best-effort). Returns true if it
- *  reacted. A reaction is not a new chat message, so it's a much smaller
- *  automation footprint than posting a "Saved" line. Never throws. */
-async function reactToMessage(messageId: string, emoji: string): Promise<boolean> {
-  if (config.dryRun || !waClient || !messageId) return false;
-  try {
-    const m = await waClient.getMessageById(messageId);
-    if (!m) return false;
-    await m.react(emoji);
-    return true;
-  } catch (err) {
-    logger.warn({ err, messageId }, 'react failed — will fall back to a text reply');
-    return false;
   }
 }
 

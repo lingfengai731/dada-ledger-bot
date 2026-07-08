@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Render the latest WhatsApp Web QR (written by the bot to data/last-qr.txt)
-# as a browser-scannable PNG and serve it over HTTP. Use when pairing code
-# fails and the noVNC terminal QR is unreadable.
+# as a browser-scannable PNG and serve it over HTTP. Also shows the latest
+# pairing code when the bot can request one.
 #
 # Usage on the VPS:
 #   cd /opt/dada-ledger-bot
@@ -15,6 +15,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 QR_TXT="${ROOT_DIR}/data/last-qr.txt"
+PAIRING_TXT="${ROOT_DIR}/data/last-pairing-code.txt"
 WEB_DIR="${TMPDIR:-/tmp}/dada-wa-qr"
 PORT="${PORT:-8080}"
 PUBLIC_HOST="${PUBLIC_HOST:-}"
@@ -52,23 +53,39 @@ cat >"${WEB_DIR}/index.html" <<'HTML'
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>DADA Bot WhatsApp QR</title>
+  <title>DADA Bot WhatsApp Link</title>
   <style>
     body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: system-ui, sans-serif; background: #f5f5f5; color: #111; }
     main { text-align: center; padding: 24px; }
     img { width: min(86vw, 560px); height: auto; image-rendering: pixelated; background: white; padding: 16px; box-shadow: 0 1px 10px #0002; }
+    .code { margin: 18px auto 0; max-width: 560px; background: white; padding: 16px; box-shadow: 0 1px 10px #0002; }
+    .label { margin: 0 0 8px; color: #555; font-size: 14px; }
+    #pairing { margin: 0; font-size: clamp(32px, 9vw, 54px); font-weight: 800; letter-spacing: .08em; }
     p { margin: 12px 0 0; color: #555; }
   </style>
 </head>
 <body>
   <main>
     <img id="qr" src="wa.png" alt="WhatsApp link QR">
-    <p>Refreshes every 5 seconds. Scan from WhatsApp → Linked devices.</p>
+    <div class="code">
+      <p class="label">Pairing code (if available)</p>
+      <pre id="pairing">loading...</pre>
+    </div>
+    <p>Refreshes every 5 seconds. Use either the pairing code or scan the QR.</p>
   </main>
   <script>
-    setInterval(() => {
+    async function refresh() {
       document.getElementById('qr').src = 'wa.png?t=' + Date.now();
-    }, 5000);
+      try {
+        const res = await fetch('pairing-code.txt?t=' + Date.now(), { cache: 'no-store' });
+        const text = (await res.text()).trim();
+        document.getElementById('pairing').textContent = text || 'No code';
+      } catch {
+        document.getElementById('pairing').textContent = 'No code';
+      }
+    }
+    refresh();
+    setInterval(refresh, 5000);
   </script>
 </body>
 </html>
@@ -78,6 +95,11 @@ HTML
   while true; do
     if [[ -s "${QR_TXT}" ]]; then
       qrencode -s 10 -m 2 -r "${QR_TXT}" -o "${WEB_DIR}/wa.png" 2>/dev/null || true
+    fi
+    if [[ -s "${PAIRING_TXT}" ]]; then
+      cp "${PAIRING_TXT}" "${WEB_DIR}/pairing-code.txt"
+    else
+      printf 'No pairing code right now\n' >"${WEB_DIR}/pairing-code.txt"
     fi
     sleep 2
   done
@@ -102,6 +124,7 @@ WhatsApp QR web page is ready:
 
 Scan from the bot phone:
   WhatsApp -> Linked devices -> Link a device
+  or choose "Link with phone number instead" and enter the page's pairing code.
 
 Keep this terminal open while scanning.
 Press Ctrl+C after the phone links successfully.

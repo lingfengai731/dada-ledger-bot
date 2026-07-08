@@ -225,17 +225,21 @@ export function createBot() {
   client.on('qr', async (qr) => {
     // Preferred when re-linking remotely: an 8-char code typed on the phone
     // ("Link with phone number instead") — no QR scanning needed.
+    const pairingCodeFile = path.join(config.paths.dataDir, 'last-pairing-code.txt');
     if (config.whatsapp.pairNumber && !pairingAsked) {
       pairingAsked = true;
       try {
+        fs.rmSync(pairingCodeFile, { force: true });
         const code = await client.requestPairingCode(config.whatsapp.pairNumber);
         const pretty = code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
+        fs.writeFileSync(pairingCodeFile, `${pretty}\n`);
         logger.info(
           `\n\n🔗 LINK WITH PHONE NUMBER — on the bot phone:\n` +
             `   WhatsApp → Linked devices → Link a device → "Link with phone number instead"\n` +
             `   then enter this code:        ${pretty}\n\n`,
         );
       } catch (err) {
+        fs.rmSync(pairingCodeFile, { force: true });
         logger.error({ err }, 'pairing-code request failed — fall back to the QR below');
       }
     }

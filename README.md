@@ -270,7 +270,7 @@ pm2 logs dada-bot --raw                        # 等日志刷出 8 位配对码(
 
 ### 浏览器扫码远程重连(配对码失效时的可靠兜底)★
 
-配对码**经常出不来**:启动时 puppeteer 常报 `Failed to add page binding … already exists`,页面一崩,`requestPairingCode` 就拿不到执行上下文 → 退回二维码;而 noVNC 终端里的 ASCII 二维码手机又扫不动。这时用这招——**服务器把二维码发布成网页,用自己电脑浏览器打开、手机扫屏幕**,实测最稳。代码已在每次二维码刷新时把原始串写到 `data/last-qr.txt`(见 `bot.ts` 的 `qr` 事件),这里就是把它渲染成清晰大图对外发布。
+配对码**经常出不来**:启动时 puppeteer 常报 `Failed to add page binding … already exists`,页面一崩,`requestPairingCode` 就拿不到执行上下文 → 退回二维码;而 noVNC 终端里的 ASCII 二维码手机又扫不动。这时用这招——**服务器把二维码和可用的 8 位配对码发布成网页,用自己电脑浏览器打开、手机扫码或输码**,实测最稳。代码已在每次二维码刷新时把原始串写到 `data/last-qr.txt`,成功拿到配对码时写到 `data/last-pairing-code.txt`;`./ops/relink-qr.sh` 会把它们渲染成网页。
 
 **一次性准备**(装一次即可):
 
@@ -309,7 +309,7 @@ ls -l data/last-qr.txt                   # 有内容即可(pm2 logs 看一眼也
    http://207.148.68.180:8080/
    ```
 
-   刷新一下页面拿最新码 → 机器人手机 WhatsApp → 已链接的设备 → 链接设备 → 对着电脑屏幕扫。
+   页面会同时显示**清晰二维码**和**Pairing code(如果 WhatsApp 成功发出)**。优先试配对码:机器人手机 WhatsApp → 已链接的设备 → 链接设备 → `Link with phone number instead` → 输入页面上的 8 位码;没有配对码或失败时就直接扫二维码。
 
 5. 看到 `WhatsApp client ready ✅` 即成功,清理:
 

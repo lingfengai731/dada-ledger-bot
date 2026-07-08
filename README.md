@@ -122,8 +122,8 @@ cancel / cancel all — discard instead
 1. **场地优先**:认得的场地(komaneka / pandawa / samabe…)⇒ 判定为婚礼。
    场地对应的**日程表日期会压过员工手写的日期**——因为一张 komaneka 的收据不可能属于别处的婚礼。
    > 例:`06/15 mitir 06/15 1.000.000 putu (komaneka)` → 婚期自动修正为 **2026-06-16**、PIC 自动填 **CHRISTI**。
-2. **婚礼日程表**(`data/wedding-schedule.csv`):DADA 人工维护的婚礼主表(客户/场地/PIC/日期)。
-   按 场地 + 离发票日最近的日期 匹配出是哪场婚礼,补全婚期与 PIC。
+2. **婚礼日程表**(优先实时读 Notion `WEDDING SCHEDULE`,失败才回退 `data/wedding-schedule.csv` 快照):DADA 人工维护的婚礼主表(客户/场地/PIC/日期)。
+   按 场地 + 离发票日最近的日期 匹配出是哪场婚礼,补全婚期与 PIC;实时 Notion 模式还能拿到婚礼页 id,用于自动填 `WEDDING` 关系列。
    - PIC 映射:`putri→PUTRI`、`Andrian Christi→CHRISTI`、`Jessica Earvin→JAY`、`DĀDA ISLAND→GENERAL`、`ling→LING`。
 3. **上下文记忆**(`src/schedule/contextMemory.ts`):14 天滚动记忆。同一天同事发的同场地/同 PIC 单子已含婚期的,
    后面没写婚期的可借用(实现"有人写了、有人没写,机器人自己推断")。
@@ -137,8 +137,7 @@ cancel / cancel all — discard instead
 - 员工随后补一句(如 `16/06 christi`)会**合并进原草稿**(不会冲掉已读到的收据),补全后即可 `ok`。
 - 非婚礼支出(general / shop)不受此限制。
 
-> ⚠️ 当前婚礼日程表读的是**导出的 CSV 快照**。要做到**实时**读取 Notion 的 WEDDING SCHEDULE,
-> 需老板把该 Notion 页面也分享给 `DADA Ledger Bot` 集成;代码已预留,分享后改一处配置即可切实时。
+> 当前生产配置应使用**实时 Notion 日程表**(`NOTION_WEDDING_DATA_SOURCE_ID` + 页面已分享给 `DADA Ledger Bot` 集成)。CSV 只作为离线兜底;如果日志里没有 `wedding schedule refreshed LIVE from Notion`,先检查 Notion 页面分享和 `.env` 配置。
 
 ---
 

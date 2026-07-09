@@ -321,6 +321,49 @@ ls -l data/last-qr.txt                   # 有内容即可(pm2 logs 看一眼也
 > `./ops/relink-qr.sh` 必须一直开着才有网页;`pm2 logs` 只是"看日志",关掉它不影响机器人后台运行——只有 `pm2 stop/restart/delete` 才动机器人。
 > 打不开网页(转圈/超时):多半是 8080 被防火墙挡了,回去做"一次性准备"里的放行;也可临时换端口:`PORT=8081 ./ops/relink-qr.sh`。
 
+### 换机器人账号 / 换群 ID
+
+怀疑旧机器人号被 WhatsApp 风控标记时,可以换一个 WhatsApp 账号重新 linked device。**不需要改代码**,只改 VPS `.env` 和登录态。
+
+这次新账号 / 新群示例:
+
+```text
+机器人手机号: +628213819236  →  WA_PAIR_NUMBER=628213819236
+新群 ID:      120363284134868849@g.us
+```
+
+在 VPS 上:
+
+```bash
+cd /opt/dada-ledger-bot
+
+pm2 stop dada-bot
+
+# 换号必须移走旧登录态;先备份,不要直接删
+mv .wwebjs_auth ".wwebjs_auth.old.$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
+rm -rf .wwebjs_cache
+
+# 改新机器人手机号和新群 id
+sed -i 's/^WA_PAIR_NUMBER=.*/WA_PAIR_NUMBER=628213819236/' .env
+sed -i 's/^WHATSAPP_GROUP_ID=.*/WHATSAPP_GROUP_ID=120363284134868849@g.us/' .env
+sed -i 's/^WHATSAPP_GROUP_NAME=.*/WHATSAPP_GROUP_NAME=/' .env   # 最稳:只按 group id 匹配
+
+# 如果 .env 里原来没有这两行,追加
+grep -q '^WA_PAIR_NUMBER=' .env || echo 'WA_PAIR_NUMBER=628213819236' >> .env
+grep -q '^WHATSAPP_GROUP_ID=' .env || echo 'WHATSAPP_GROUP_ID=120363284134868849@g.us' >> .env
+
+pm2 restart dada-bot
+./ops/relink-qr.sh
+```
+
+打开 `http://207.148.68.180:8080/`,优先输入网页上的 pairing code;没有或失败就扫二维码。连上后测试:
+
+```text
+15/6 gen 50000 test by putu
+```
+
+> 注意:新 WhatsApp 账号必须已经被拉进目标群;换的是机器人账号,不是 Notion/账本。`.wwebjs_auth` 绑定旧账号,换号必须移走它。新号最好先真人养号几天(头像/名字/正常聊天),不要刚注册就高频自动化。
+
 ### 正式上线 / 切群
 
 1. 让管理员把 **DADA_BOT** 拉进目标群(进群后机器人会自动发中/英/印尼三语自我介绍;若漏发,群里打 `/help` 即可)。

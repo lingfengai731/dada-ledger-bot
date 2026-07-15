@@ -11,6 +11,8 @@ dist/
 # runtime data: local DB, downloaded receipt images, WhatsApp session
 data/
 .wwebjs_auth/
+.wwebjs_auth_local/
+.wwebjs_auth_local.old.*/
 .wwebjs_cache/
 
 # real chat exports / sample data — NEVER commit (private financial data)

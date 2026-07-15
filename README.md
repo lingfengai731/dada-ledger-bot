@@ -321,6 +321,47 @@ ls -l data/last-qr.txt                   # 有内容即可(pm2 logs 看一眼也
 > `./ops/relink-qr.sh` 必须一直开着才有网页;`pm2 logs` 只是"看日志",关掉它不影响机器人后台运行——只有 `pm2 stop/restart/delete` 才动机器人。
 > 打不开网页(转圈/超时):多半是 8080 被防火墙挡了,回去做"一次性准备"里的放行;也可临时换端口:`PORT=8081 ./ops/relink-qr.sh`。
 
+### 本地 Windows 兜底运行(官方 Web 能连、VPS 机器人不能连时)
+
+如果新号在你自己电脑的 `https://web.whatsapp.com` **可以正常 link**,但 VPS/headless 机器人一直提示 `can't link new devices right now`,说明问题很可能是 VPS 数据中心 IP / headless Chrome / puppeteer 环境触发风控。此时可以临时让**自己电脑充当机器人主机**。
+
+> 重要:本地跑机器人仍然需要 WhatsApp linked device。它不能直接复用你普通浏览器里已经登录的 WhatsApp Web 会话;机器人会开一个独立 Chrome/Edge profile。区别是:它在你的本机网络和可视浏览器里 link,通常比 VPS/noVNC/headless 更容易成功。
+
+1. 先停 VPS,避免两个机器人同时回同一个群:
+
+```bash
+cd /opt/dada-ledger-bot
+pm2 stop dada-bot
+```
+
+2. 在 Windows 本机 PowerShell:
+
+```powershell
+cd E:\Agentfinance
+git pull origin main
+npm install
+powershell -ExecutionPolicy Bypass -File .\ops\windows-start-bot.ps1
+```
+
+脚本会自动:
+- 使用可视 Chrome/Edge (`PUPPETEER_HEADLESS=false`)
+- 使用独立本地登录态 `.wwebjs_auth_local`
+- 禁用 pairing-code 请求(`WA_PAIR_NUMBER=''`),直接扫可视浏览器 QR,避开 flaky `requestPairingCode`
+
+3. 如果扫错号/要换号,只清本地登录态:
+
+```powershell
+cd E:\Agentfinance
+powershell -ExecutionPolicy Bypass -File .\ops\windows-reset-local-wa-auth.ps1
+powershell -ExecutionPolicy Bypass -File .\ops\windows-start-bot.ps1
+```
+
+4. 本地长期运行注意:
+- 电脑不能睡眠/断网;PowerShell 窗口要保持开着。
+- `.env` 仍然要指向正确 `WHATSAPP_GROUP_ID`、Notion、Anthropic key。
+- 本地测试通过后,先发 `15/6 gen 50000 test by putu`,再回 `ok`,确认 `✅ Saved to Notion.`。
+- 以后若 VPS 账号/link 恢复,先 `Ctrl+C` 停本地机器人,再 `pm2 restart dada-bot`。
+
 ### 换机器人账号 / 换群 ID
 
 怀疑旧机器人号被 WhatsApp 风控标记时,可以换一个 WhatsApp 账号重新 linked device。**不需要改代码**,只改 VPS `.env` 和登录态。

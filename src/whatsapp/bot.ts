@@ -199,7 +199,8 @@ export function createBot() {
   const client = new Client({
     authStrategy: new LocalAuth({ dataPath: config.paths.waAuthDir }),
     puppeteer: {
-      headless: true,
+      headless: config.whatsapp.headless,
+      ...(config.whatsapp.executablePath ? { executablePath: config.whatsapp.executablePath } : {}),
       // Trim the headless-Chrome footprint — whatsapp-web.js keeps a full Chrome
       // running 24/7, which on a small VPS pegs CPU/RAM (Vultr flagged us for it).
       args: [

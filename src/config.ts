@@ -21,6 +21,11 @@ export const config = {
     /** Bot's own number (e.g. 8613078287710) to link via an 8-char pairing code
      *  instead of scanning a QR — far easier when re-linking over SSH/console. */
     pairNumber: (process.env.WA_PAIR_NUMBER ?? '').replace(/\D/g, ''),
+    /** Local/desktop fallback: show a visible Chrome window for WhatsApp Web.
+     *  Default stays headless for the VPS. */
+    headless: bool(process.env.PUPPETEER_HEADLESS, true),
+    /** Optional Chrome/Chromium executable path (useful on Windows local runs). */
+    executablePath: process.env.CHROME_EXECUTABLE_PATH ?? '',
   },
   notion: {
     apiKey: process.env.NOTION_API_KEY ?? '',
@@ -73,7 +78,7 @@ export const config = {
     dataDir: DATA_DIR,
     dbFile: path.join(DATA_DIR, 'ledger.db'),
     imagesDir: path.join(DATA_DIR, 'images'),
-    waAuthDir: path.resolve('./.wwebjs_auth'),
+    waAuthDir: path.resolve(process.env.WA_AUTH_DIR ?? './.wwebjs_auth'),
     /** Local snapshot of the Notion WEDDING SCHEDULE used to fill missing wedding date / PIC / venue. */
     weddingScheduleCsv: path.join(DATA_DIR, 'wedding-schedule.csv'),
   },

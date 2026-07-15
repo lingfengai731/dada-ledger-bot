@@ -405,6 +405,63 @@ pm2 restart dada-bot
 
 > 注意:新 WhatsApp 账号必须已经被拉进目标群;换的是机器人账号,不是 Notion/账本。`.wwebjs_auth` 绑定旧账号,换号必须移走它。新号最好先真人养号几天(头像/名字/正常聊天),不要刚注册就高频自动化。
 
+### 连接状态排障:linked 但 bot/health down
+
+#### 1. 目标群 ID 配了,但 `Groups the bot is in` 没出现
+
+这通常不是代码问题,而是**当前 linked 的 WhatsApp 账号并没有真正加入目标群**。`.env` 里 `WHATSAPP_GROUP_ID=120...@g.us` 只代表"机器人想监听哪个群";它不能让账号自动进群。
+
+排查:
+
+```bash
+pm2 logs dada-bot --lines 80 --nostream
+```
+
+看两处:
+- `target: "120363284134868849@g.us"`:说明 `.env` 配置目标群正确。
+- `Groups the bot is in`:这是**当前账号实际加入的群**。如果没有 `...8849@g.us`,说明账号没进群或群 ID 抄错。
+
+最稳修复:
+1. 拿当前 linked 的机器人手机,确认 WhatsApp 聊天列表里能看到目标群。
+2. 如果看不到,让群管理员用"添加参与者"直接把 `+628213819236` 加进群,不要只发邀请链接。
+3. 加完后不需要重新扫码,直接:
+
+```bash
+pm2 restart dada-bot
+pm2 logs dada-bot --lines 80 --nostream
+```
+
+#### 2. 手机显示 linked device,但机器人 `OPENING` / healthchecks.io down
+
+手机里"已连接设备"只说明 WhatsApp 服务器端还保留这个设备记录,不代表机器人进程已经进入 `ready`。有时 whatsapp-web.js 会卡在 `OPENING`:既没成功,也没明确断开,所以库内置的自动重连不会触发;healthcheck 也不会 ping,就会显示 down。
+
+先看完整日志:
+
+```bash
+pm2 status
+pm2 logs dada-bot --lines 300 --nostream | grep -A 5 -i "error\|conflict\|closed\|banned\|restrict\|OPENING"
+```
+
+如果没有明确封号/限制,只是长期 `OPENING`,先做低风险强制重启:
+
+```bash
+pm2 stop dada-bot
+pm2 restart dada-bot
+pm2 logs dada-bot --lines 40
+```
+
+如果还是卡住,再在手机端移除这个 linked device,备份 session 后重连:
+
+```bash
+pm2 stop dada-bot
+mv .wwebjs_auth ".wwebjs_auth.stuck.$(date +%s)"
+rm -rf .wwebjs_cache
+pm2 restart dada-bot
+./ops/relink-qr.sh
+```
+
+> 经验:如果 `stop` + `restart` 后过一会恢复 `WhatsApp client ready ✅`,说明是"握手卡死"而不是账号彻底失效。当前代码已有 `UNREACHABLE` 自愈,但 `OPENING` 卡死可能不会触发 `getState()` 抛错;必要时再加外部 watchdog,用 healthchecks.io down 状态自动 `pm2 restart`。
+
 ### 正式上线 / 切群
 
 1. 让管理员把 **DADA_BOT** 拉进目标群(进群后机器人会自动发中/英/印尼三语自我介绍;若漏发,群里打 `/help` 即可)。

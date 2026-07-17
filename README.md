@@ -179,7 +179,7 @@ ANTHROPIC_MODEL=auto                          # auto=启动时自动选最新最
 ANTHROPIC_PARSE_MODEL=claude-sonnet-4-6       # 读文字说明用的快模型(读图仍用上面的);设 main 则全用主模型
 COLLECT_WAIT_MS=12000                         # 图文分开发时等配对的毫秒数(默认 12 秒;符合模板的消息不等,~3 秒直接处理)
 
-WHATSAPP_GROUP_ID=120363426839508686@g.us   # 测试群;上线改成真实 DADA 群 120363284134868849@g.us
+WHATSAPP_GROUP_ID=120363428168476822@g.us   # testing 副群/测试群;频道 2 时仍保留为互动/审计群
 WA_PAIR_NUMBER=8613078287710                 # 机器人自己的号;设了就能用"手机号配对码"远程连号(免扫二维码)
 TRIGGER_MODE=auto                            # 报账专用群:任意收据/金额/日期都视为提交
 DRY_RUN=false                                # true=只读不发(本地调试用)
@@ -190,7 +190,7 @@ HUMANIZE_REPLIES=true                         # 回复前标记已读+显示"正
 # MAIN_SILENT_GROUP_ID 是正式工作群:机器人只读、直接写 Notion、不在该群发言。
 # AUDIT_GROUP_ID 是副群/测试群:只收到 "07/17 10:05 Saved to Notion." 这类状态回执。
 MAIN_SILENT_GROUP_ID=
-AUDIT_GROUP_ID=120363426839508686@g.us
+AUDIT_GROUP_ID=120363428168476822@g.us
 MAIN_SILENT_AUTOSAVE=false                    # 确认主群 id 后再改 true;信息缺 wedding date/PIC 时不会写入,只在副群提示
 
 NOTION_API_KEY=ntn_...
@@ -520,15 +520,15 @@ VPS 上启用频道 2:
 cd /opt/dada-ledger-bot
 
 # 频道 1: 副群/测试群,保留原互动确认流程
-sed -i 's|^WHATSAPP_GROUP_ID=.*|WHATSAPP_GROUP_ID=120363426839508686@g.us|' .env
+sed -i 's|^WHATSAPP_GROUP_ID=.*|WHATSAPP_GROUP_ID=120363428168476822@g.us|' .env
 
 # 频道 2: 正式主群,只读 + 直接写 Notion
 grep -q '^MAIN_SILENT_GROUP_ID=' .env || echo 'MAIN_SILENT_GROUP_ID=' >> .env
 grep -q '^AUDIT_GROUP_ID=' .env || echo 'AUDIT_GROUP_ID=' >> .env
 grep -q '^MAIN_SILENT_AUTOSAVE=' .env || echo 'MAIN_SILENT_AUTOSAVE=false' >> .env
 
-sed -i 's|^MAIN_SILENT_GROUP_ID=.*|MAIN_SILENT_GROUP_ID=<真实主群@g.us>|' .env
-sed -i 's|^AUDIT_GROUP_ID=.*|AUDIT_GROUP_ID=120363426839508686@g.us|' .env
+sed -i 's|^MAIN_SILENT_GROUP_ID=.*|MAIN_SILENT_GROUP_ID=120363284134868849@g.us|' .env
+sed -i 's|^AUDIT_GROUP_ID=.*|AUDIT_GROUP_ID=120363428168476822@g.us|' .env
 sed -i 's|^MAIN_SILENT_AUTOSAVE=.*|MAIN_SILENT_AUTOSAVE=true|' .env
 sed -i 's|^NOTION_ATTACH_RECEIPTS=.*|NOTION_ATTACH_RECEIPTS=false|' .env
 

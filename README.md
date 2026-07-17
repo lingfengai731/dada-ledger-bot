@@ -462,6 +462,22 @@ pm2 restart dada-bot
 
 > 经验:如果 `stop` + `restart` 后过一会恢复 `WhatsApp client ready ✅`,说明是"握手卡死"而不是账号彻底失效。当前代码已有 `UNREACHABLE` 自愈,但 `OPENING` 卡死可能不会触发 `getState()` 抛错;必要时再加外部 watchdog,用 healthchecks.io down 状态自动 `pm2 restart`。
 
+#### 3. `ready` / health up,但报 `failed to list chats` 或 `error handling message: "r"`
+
+这是 WhatsApp Web 刚 linked 后偶发的页面上下文问题:客户端已经 `ready`,healthcheck 也会 up,但 `getChats()` / `getChat()` 访问 chat store 时抛一个很短的 `"r"` 错误。表现是日志里有:
+
+```text
+INFO: WhatsApp client ready ✅
+ERROR: failed to list chats
+ERROR: error handling message
+message: "r"
+```
+
+处理原则:
+- 如果 `.env` 已固定 `WHATSAPP_GROUP_ID`,机器人不需要每条消息都 `getChat()` 才能判断目标群;代码会优先用 `msg.from === WHATSAPP_GROUP_ID` 过滤目标群,避开这类 chat-store 报错。
+- `failed to list chats` 只是启动时打印群列表失败,不等于机器人必然 offline。真正判断看目标群发测试消息后是否有六字段确认。
+- 若仍不回,先 `git pull origin main && pm2 restart dada-bot`,确认已部署含该修复的版本;再看 `pm2 logs dada-bot --lines 80 --nostream`。
+
 ### 正式上线 / 切群
 
 1. 让管理员把 **DADA_BOT** 拉进目标群(进群后机器人会自动发中/英/印尼三语自我介绍;若漏发,群里打 `/help` 即可)。

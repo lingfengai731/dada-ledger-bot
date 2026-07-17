@@ -387,9 +387,15 @@ export function createBot() {
 }
 
 async function isTargetGroup(msg: WAMessage): Promise<boolean> {
+  // When WHATSAPP_GROUP_ID is pinned, the incoming group id is already on
+  // msg.from. Prefer this cheap check: after a fresh link WhatsApp Web can report
+  // "ready" while getChat()/getChats() still throws from the page context, which
+  // would otherwise make the bot ignore every valid group message.
+  if (config.whatsapp.groupId) {
+    return msg.from === config.whatsapp.groupId;
+  }
   const chat: WAChat = await msg.getChat();
   if (!chat.isGroup) return false;
-  if (config.whatsapp.groupId) return chat.id._serialized === config.whatsapp.groupId;
   return chat.name === config.whatsapp.groupName;
 }
 

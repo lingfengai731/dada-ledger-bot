@@ -513,6 +513,7 @@ message: "r"
 - 婚礼账单如果缺 `WEDDING DATE` 或 `PIC`,不会直接写入 Notion,而是在审计群提示 `Not saved - ... needs WEDDING DATE / PIC.` 这样避免脏数据进账本。
 - 图片不需要进 Notion 时,保持 `NOTION_ATTACH_RECEIPTS=false`。
 - "正在输入..." 逻辑没有删除:由 `HUMANIZE_REPLIES=true` 控制。它只是 WhatsApp 顶部短暂 presence,不是一条消息;如果 WhatsApp Web 刚 relink 后 `getChatById/getChat` 抛 `"r"`,presence 会自动跳过,但不影响发送正文。
+- 风控边界:这不是 WhatsApp 官方 Business API,所以不能承诺 0 风险。频道 2 已把主群风险降到最低:机器人不在主群发言、不发入群自我介绍、不 @ 人、不刷屏;主群只发生一个已加入成员读取消息。若老板要求"绝对不能有任何风险",就不要把机器人拉进主群,继续让员工/管理员把 invoice 转发到 testing 群处理。
 
 VPS 上启用频道 2:
 

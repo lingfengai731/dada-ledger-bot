@@ -375,6 +375,11 @@ export function createBot() {
       const added: string[] = (notification as any).recipientIds ?? [];
       if (!me || !added.includes(me)) return;
       const chat = await notification.getChat();
+      const groupId = (chat as any)?.id?._serialized ?? '';
+      if (config.silentIntake.sourceGroupId && groupId === config.silentIntake.sourceGroupId) {
+        logger.info({ group: chat.name, groupId }, 'bot added to silent intake group - intro suppressed');
+        return;
+      }
       logger.info({ group: chat.name }, 'bot added to a group — introducing itself');
       if (!config.dryRun) await chat.sendMessage(INTRO_MESSAGE);
       else logger.info('\n[intro preview]\n' + INTRO_MESSAGE);

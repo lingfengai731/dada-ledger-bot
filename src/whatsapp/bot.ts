@@ -1179,13 +1179,36 @@ async function commitPendings(msg: WAMessage, pendings: Pending[]): Promise<void
     // so it's unambiguous which entry was recorded (tap to jump back to it).
     const text = savedToNotion > 0 ? '✅ Saved to Notion.' : '✅ Recorded. _(Notion preview mode — not written yet.)_';
     for (const p of savedPendings) {
-      await sendToChat(p.chatId, text, '[saved receipt preview]', { quotedMessageId: p.waMessageId });
+      await sendSavedReceipt(msg, p, text);
     }
   }
   if (blockedLines.length) {
     await reply(msg, ['🚫 *Not saved yet — missing required info:*', ...blockedLines,
       '', 'Reply with the missing detail (e.g. _16/06 christi_), then *ok* — or quote the one you want to drop and reply *cancel*.'].join('\n'));
   }
+}
+
+async function sendSavedReceipt(msg: WAMessage, pending: Pending, text: string): Promise<void> {
+  const strictQuote = { ignoreQuoteErrors: false, waitUntilMsgSent: true };
+  const original = await sendToChat(pending.chatId, text, '[saved receipt preview]', {
+    quotedMessageId: pending.waMessageId,
+    ...strictQuote,
+  });
+  if (original) return;
+
+  if (pending.summaryMsgId && pending.summaryMsgId !== pending.waMessageId) {
+    const summary = await sendToChat(pending.chatId, text, '[saved receipt summary-quote fallback]', {
+      quotedMessageId: pending.summaryMsgId,
+      ...strictQuote,
+    });
+    if (summary) return;
+  }
+
+  logger.warn(
+    { pendingId: pending.id, waMessageId: pending.waMessageId, summaryMsgId: pending.summaryMsgId },
+    'saved receipt could not quote original or summary; falling back to ok reply',
+  );
+  await reply(msg, text);
 }
 
 /** Write every draft in a pending set to Notion + the local store. Shared by the

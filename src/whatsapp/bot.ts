@@ -101,6 +101,13 @@ function pendingsForSender(sender: string): Pending[] {
   return [...pendingDrafts.values()].filter((p) => p.sender === sender).sort((a, b) => a.ts - b.ts);
 }
 
+/** Every open pending in a chat, newest last. Used for group-wide operator actions
+ * like "cancel all", and as a fallback when WhatsApp reports the same human under
+ * a different sender id across devices/sessions. */
+function pendingsForChat(chatId: string): Pending[] {
+  return [...pendingDrafts.values()].filter((p) => p.chatId === chatId).sort((a, b) => a.ts - b.ts);
+}
+
 /** The sender's most-recently-shown pending (the default target for a correction). */
 function currentPending(sender: string): Pending | null {
   const all = pendingsForSender(sender);
@@ -458,10 +465,31 @@ async function handleMessage(msg: WAMessage): Promise<void> {
   }
 
   const word = body.toLowerCase().replace(/[^a-z]/g, '');
+  const wantsAll = word === 'okall' || word === 'allok' || word === 'cancelall' || word === 'allcancel';
+  const chatPendings = pendingsForChat(msg.from);
+  const quotedId = quoted?.id?._serialized ?? null;
+  const chatTargeted = quotedId
+    ? chatPendings.find((p) => p.summaryMsgId === quotedId || p.nudgeMsgId === quotedId || p.waMessageId === quotedId) ?? null
+    : null;
+  if (word === 'cancelall' || word === 'allcancel') {
+    for (const p of chatPendings) clearPending(p);
+    await reply(
+      msg,
+      chatPendings.length > 0
+        ? `🗑️ Cancelled ${chatPendings.length} pending expense${chatPendings.length > 1 ? 's' : ''} in this chat.`
+        : '🗑️ No pending expenses in this chat.',
+    );
+    return;
+  }
+  if (chatTargeted && /\bcancel\b/i.test(body)) {
+    clearPending(chatTargeted);
+    await reply(msg, '🗑️ Cancelled — nothing was saved.');
+    return;
+  }
+
   const pendings = pendingsForSender(sender);
   if (pendings.length) {
     // Quoting one of my confirm messages targets THAT pending; otherwise the latest.
-    const quotedId = quoted?.id?._serialized ?? null;
     const targeted = quotedId
       ? pendings.find((p) => p.summaryMsgId === quotedId || p.nudgeMsgId === quotedId || p.waMessageId === quotedId) ?? null
       : null;
@@ -469,17 +497,16 @@ async function handleMessage(msg: WAMessage): Promise<void> {
 
     // Boss's rule: a plain "ok" confirms ONLY the most recent submission (or the
     // quoted one); "ok all" / "all ok" confirms everything open. Same for cancel.
-    const wantsAll = word === 'okall' || word === 'allok' || word === 'cancelall' || word === 'allcancel';
     if (CONFIRM_WORDS.has(word) || word === 'okall' || word === 'allok' || body.includes('✅')) {
       await commitPendings(msg, wantsAll ? pendings : [targeted ?? target]);
       return;
     }
     // "cancel" drops the most recent (or quoted — e.g. "Cancel unsaved expenses"
     // quoting a summary); "cancel all" drops everything open.
-    if (CANCEL_WORDS.has(word) || word === 'cancelall' || word === 'allcancel' || (targeted && /\bcancel\b/i.test(body))) {
-      const toCancel = wantsAll ? pendings : [targeted ?? target];
+    if (CANCEL_WORDS.has(word)) {
+      const toCancel = [target];
       for (const p of toCancel) clearPending(p);
-      await reply(msg, toCancel.length > 1 ? `🗑️ Cancelled ${toCancel.length} pending expenses.` : '🗑️ Cancelled — nothing was saved.');
+      await reply(msg, '🗑️ Cancelled — nothing was saved.');
       return;
     }
     // "1. 130000" / "3. christi" → fix specific row(s) of the targeted set.
@@ -1247,6 +1274,7 @@ async function savePending(pending: Pending, sender: string): Promise<{ savedToN
 async function sweepPending(): Promise<void> {
   const now = Date.now();
   for (const row of store.pendingOlderThan(now - NUDGE_MS)) {
+    if (!pendingDrafts.has(row.id)) continue;
     let pending: Pending;
     try {
       pending = JSON.parse(row.payload_json) as Pending;
@@ -1260,6 +1288,7 @@ async function sweepPending(): Promise<void> {
 
     // ── 8h: auto-save complete drafts; nudge blocked ones once. ──
     if (age >= AUTO_WRITE_MS) {
+      if (!pendingDrafts.has(row.id)) continue;
       const stillMissing = pending.drafts.some((d) => missingRequired(d).length);
       if (stillMissing) {
         if (!row.reminded) {
@@ -1289,6 +1318,7 @@ async function sweepPending(): Promise<void> {
 
     // ── 30 min: @-nudge the staff who posted it, once. ──
     if (!pending.nudged30) {
+      if (!pendingDrafts.has(row.id)) continue;
       await sendNudge(row.sender, row.chat_id, pending);
       pending.nudged30 = true;
       store.updatePendingPayload(row.id, JSON.stringify(pending));

@@ -444,6 +444,11 @@ export const store = {
     db.prepare('DELETE FROM pending_drafts WHERE id = ?').run(id);
   },
 
+  deletePendingByChat(chatId: string): number {
+    const result = db.prepare('DELETE FROM pending_drafts WHERE chat_id = ?').run(chatId) as { changes?: number };
+    return result.changes ?? 0;
+  },
+
   markPendingReminded(id: string): void {
     db.prepare('UPDATE pending_drafts SET reminded = 1 WHERE id = ?').run(id);
   },

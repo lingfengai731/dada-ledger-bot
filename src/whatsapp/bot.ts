@@ -96,6 +96,18 @@ function clearPending(p: Pending): void {
   }
 }
 
+function clearPendingsForChat(chatId: string): number {
+  const memoryMatches = pendingsForChat(chatId);
+  for (const p of memoryMatches) pendingDrafts.delete(p.id);
+  let dbDeleted = 0;
+  try {
+    dbDeleted = store.deletePendingByChat(chatId);
+  } catch (err) {
+    logger.error({ err, chatId }, 'failed to clear pending drafts by chat');
+  }
+  return Math.max(memoryMatches.length, dbDeleted);
+}
+
 /** Every open pending a sender has, newest last. */
 function pendingsForSender(sender: string): Pending[] {
   return [...pendingDrafts.values()].filter((p) => p.sender === sender).sort((a, b) => a.ts - b.ts);
@@ -472,11 +484,11 @@ async function handleMessage(msg: WAMessage): Promise<void> {
     ? chatPendings.find((p) => p.summaryMsgId === quotedId || p.nudgeMsgId === quotedId || p.waMessageId === quotedId) ?? null
     : null;
   if (word === 'cancelall' || word === 'allcancel') {
-    for (const p of chatPendings) clearPending(p);
+    const cancelled = clearPendingsForChat(msg.from);
     await reply(
       msg,
-      chatPendings.length > 0
-        ? `🗑️ Cancelled ${chatPendings.length} pending expense${chatPendings.length > 1 ? 's' : ''} in this chat.`
+      cancelled > 0
+        ? `🗑️ Cancelled ${cancelled} pending expense${cancelled > 1 ? 's' : ''} in this chat.`
         : '🗑️ No pending expenses in this chat.',
     );
     return;

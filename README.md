@@ -478,6 +478,22 @@ message: "r"
 - `failed to list chats` 只是启动时打印群列表失败,不等于机器人必然 offline。真正判断看目标群发测试消息后是否有六字段确认。
 - 若仍不回,先 `git pull origin main && pm2 restart dada-bot`,确认已部署含该修复的版本;再看 `pm2 logs dada-bot --lines 80 --nostream`。
 
+#### 4. `media download failed` / 图片收据不回
+
+如果日志里出现:
+
+```text
+WARN: media download failed
+message: "r"
+```
+
+说明机器人收到了图片消息,但 WhatsApp Web 暂时无法把图片文件下载给 puppeteer。新代码会:
+- 对 `downloadMedia()` 重试 3 次。
+- 如果图片带 caption 且 caption 像报账格式,即使图片下载失败也会按**纯文字报账**继续确认,避免静默丢单。
+- 如果是纯图片且下载失败,会提醒员工重发图片或补一条文字说明。
+
+因此强烈建议员工发票据时**图片配 caption**(至少包含日期、类型、金额、付款人),这样即使 WhatsApp 图片下载偶发失败,账也不会完全卡住。
+
 ### 正式上线 / 切群
 
 1. 让管理员把 **DADA_BOT** 拉进目标群(进群后机器人会自动发中/英/印尼三语自我介绍;若漏发,群里打 `/help` 即可)。

@@ -502,32 +502,55 @@ function mediaKey(messageId: string): string {
   return messageId.replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Download a message's media to disk and buffer it. Returns null if it isn't a
  *  supported image/PDF or the download fails (so a quoted note still falls back
  *  to a plain note instead of throwing). */
 async function bufferMedia(m: WAMessage): Promise<BufferedImage | null> {
-  try {
-    const media = await m.downloadMedia();
-    if (!media || !SUPPORTED_MEDIA.has(media.mimetype)) return null;
-    const ext = media.mimetype === 'application/pdf' ? 'pdf' : (media.mimetype.split('/')[1] ?? 'jpg');
-    const imagePath = path.join(config.paths.imagesDir, `${mediaKey(m.id._serialized)}.${ext}`);
-    fs.writeFileSync(imagePath, Buffer.from(media.data, 'base64'));
-    return { ts: Date.now(), mimetype: media.mimetype, data: media.data, imagePath };
-  } catch (err) {
-    logger.warn({ err }, 'media download failed');
-    return null;
+  const waits = [0, 1500, 4000];
+  let lastErr: unknown = null;
+  for (let i = 0; i < waits.length; i++) {
+    if (waits[i]) await sleep(waits[i]);
+    try {
+      const media = await m.downloadMedia();
+      if (!media || !SUPPORTED_MEDIA.has(media.mimetype)) return null;
+      const ext = media.mimetype === 'application/pdf' ? 'pdf' : (media.mimetype.split('/')[1] ?? 'jpg');
+      const imagePath = path.join(config.paths.imagesDir, `${mediaKey(m.id._serialized)}.${ext}`);
+      fs.writeFileSync(imagePath, Buffer.from(media.data, 'base64'));
+      return { ts: Date.now(), mimetype: media.mimetype, data: media.data, imagePath };
+    } catch (err) {
+      lastErr = err;
+      logger.warn({ err, attempt: i + 1, attempts: waits.length }, 'media download attempt failed');
+    }
   }
+  logger.warn({ err: lastErr }, 'media download failed');
+  return null;
 }
 
 async function onImage(msg: WAMessage, sender: string): Promise<void> {
+  const caption = (msg.body ?? '').trim();
   const img = await bufferMedia(msg);
-  if (!img) return;
+  if (!img) {
+    // If WhatsApp Web cannot download the image but staff included the required
+    // note as a caption, keep the workflow moving as a text-only expense instead
+    // of silently dropping the submission.
+    if (caption && looksLikeExpense(caption)) {
+      await onNote(msg, sender, stripKeyword(caption));
+    } else if (caption) {
+      logger.warn({ caption }, 'media download failed; caption did not look like an expense');
+    } else {
+      await reply(msg, '⚠️ I could not download this receipt image. Please resend it, or send the expense details as text.');
+    }
+    return;
+  }
   const imagePath = img.imagePath;
 
   // Staff usually post the photo WITH a caption ("0617 kyea ... trf ling"). That
   // caption is the note — capture it, or it's silently lost and the expense is
   // read from the image alone (wrong category/PIC/description).
-  const caption = (msg.body ?? '').trim();
 
   // A late receipt photo for the one expense we just showed (text first, photo
   // after the collect window) → attach it to that draft and re-derive. A photo

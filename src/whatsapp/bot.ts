@@ -594,7 +594,9 @@ async function onImage(msg: WAMessage, sender: string): Promise<void> {
     // note as a caption, keep the workflow moving as a text-only expense instead
     // of silently dropping the submission.
     if (caption && looksLikeExpense(caption)) {
-      await onNote(msg, sender, stripKeyword(caption));
+      await buildFromCollection(msg, sender, stripKeyword(caption), null, [
+        'Receipt image was attached, but WhatsApp Web could not download it — recorded from the caption only.',
+      ]);
     } else if (caption) {
       logger.warn({ caption }, 'media download failed; caption did not look like an expense');
     } else {
@@ -1005,6 +1007,7 @@ async function buildFromCollection(
   sender: string,
   noteText: string,
   img: BufferedImage | null,
+  extraWarnings: string[] = [],
 ): Promise<void> {
   // Reimbursement: read the bank-transfer screenshot(s); each transfer = one row
   // with the amount in REIMBURSED (no COST / wedding / PIC). Works text-only too
@@ -1021,6 +1024,8 @@ async function buildFromCollection(
   if (img) {
     receipt = await readReceipt(img);
     if (!receipt) extra.push('Could not read the receipt image clearly.');
+  } else if (extraWarnings.length) {
+    extra.push(...extraWarnings);
   } else {
     extra.push('No photo attached — recorded from your note only.');
   }
@@ -1217,13 +1222,10 @@ async function commitPendings(msg: WAMessage, pendings: Pending[]): Promise<void
 
 async function sendSavedReceipt(msg: WAMessage, pending: Pending, text: string): Promise<void> {
   const strictQuote = { ignoreQuoteErrors: false, waitUntilMsgSent: true };
-  const original = await sendToChat(pending.chatId, text, '[saved receipt preview]', {
-    quotedMessageId: pending.waMessageId,
-    ...strictQuote,
-  });
-  if (original) return;
+  if (pending.summaryMsgId) {
+    const summaryReply = await replyToStoredMessage(pending.summaryMsgId, text);
+    if (summaryReply) return;
 
-  if (pending.summaryMsgId && pending.summaryMsgId !== pending.waMessageId) {
     const summary = await sendToChat(pending.chatId, text, '[saved receipt summary-quote fallback]', {
       quotedMessageId: pending.summaryMsgId,
       ...strictQuote,
@@ -1231,11 +1233,33 @@ async function sendSavedReceipt(msg: WAMessage, pending: Pending, text: string):
     if (summary) return;
   }
 
+  const original = await sendToChat(pending.chatId, text, '[saved receipt preview]', {
+    quotedMessageId: pending.waMessageId,
+    ...strictQuote,
+  });
+  if (original) return;
+
   logger.warn(
     { pendingId: pending.id, waMessageId: pending.waMessageId, summaryMsgId: pending.summaryMsgId },
     'saved receipt could not quote original or summary; falling back to ok reply',
   );
   await reply(msg, text);
+}
+
+async function replyToStoredMessage(messageId: string, text: string): Promise<WAMessage | null> {
+  try {
+    if (config.dryRun) {
+      logger.info(`\n[saved receipt stored-message reply preview]\n${text}`);
+      return null;
+    }
+    const quoted = await waClient?.getMessageById(messageId);
+    if (!quoted) return null;
+    await humanizeBefore(await quoted.getChat().catch(() => null), text);
+    return await quoted.reply(text);
+  } catch (err) {
+    logger.warn({ err, messageId }, 'replyToStoredMessage failed');
+    return null;
+  }
 }
 
 /** Write every draft in a pending set to Notion + the local store. Shared by the

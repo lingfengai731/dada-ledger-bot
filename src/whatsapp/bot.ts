@@ -50,6 +50,8 @@ interface Pending {
   nudged30?: boolean;
   /** id of the bot's confirm-summary message, so the nudge can quote-reply it. */
   summaryMsgId?: string;
+  /** id of the 30-min reminder, so quoting that reminder + cancel targets this pending. */
+  nudgeMsgId?: string;
 }
 
 // A draft nobody replied "ok" to is auto-saved after this long (boss's rule:
@@ -460,7 +462,9 @@ async function handleMessage(msg: WAMessage): Promise<void> {
   if (pendings.length) {
     // Quoting one of my confirm messages targets THAT pending; otherwise the latest.
     const quotedId = quoted?.id?._serialized ?? null;
-    const targeted = quotedId ? pendings.find((p) => p.summaryMsgId === quotedId || p.waMessageId === quotedId) ?? null : null;
+    const targeted = quotedId
+      ? pendings.find((p) => p.summaryMsgId === quotedId || p.nudgeMsgId === quotedId || p.waMessageId === quotedId) ?? null
+      : null;
     const target = targeted ?? pendings[pendings.length - 1];
 
     // Boss's rule: a plain "ok" confirms ONLY the most recent submission (or the
@@ -1291,16 +1295,17 @@ async function humanizeBefore(chat: WAChat | null | undefined, text: string): Pr
 }
 
 /** Send to a chat (respecting dry-run), logging a preview when dry. */
-async function sendToChat(chatId: string, text: string, previewLabel: string, opts?: object): Promise<void> {
+async function sendToChat(chatId: string, text: string, previewLabel: string, opts?: object): Promise<WAMessage | null> {
   try {
     if (!config.dryRun) {
       const chat = waClient ? await waClient.getChatById(chatId).catch(() => null) : null;
       await humanizeBefore(chat, text);
-      await waClient?.sendMessage(chatId, text, opts as any);
+      return (await waClient?.sendMessage(chatId, text, opts as any)) ?? null;
     } else logger.info(`\n${previewLabel}\n` + text);
   } catch (err) {
     logger.error({ err, chatId }, 'sendToChat failed');
   }
+  return null;
 }
 
 /** Remind the staff member who posted an unconfirmed expense, @-mentioning them. */
@@ -1321,7 +1326,8 @@ async function sendNudge(sender: string, chatId: string, pending: Pending): Prom
   const opts: { mentions: string[]; quotedMessageId?: string } = { mentions: [sender] };
   const quote = pending.summaryMsgId ?? pending.waMessageId;
   if (quote) opts.quotedMessageId = quote;
-  await sendToChat(chatId, text, '[nudge preview]', opts);
+  const sent = await sendToChat(chatId, text, '[nudge preview]', opts);
+  if (sent) pending.nudgeMsgId = sent.id._serialized;
 }
 
 function renderSummary(drafts: ExpenseDraft[]): string {

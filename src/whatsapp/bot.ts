@@ -13,7 +13,7 @@ import { answerQuestion } from '../agents/queryAgent.js';
 import { enrichDraft, missingRequired, displayWeddingDate, displayPic } from '../schedule/enrich.js';
 import { buildPeriodSummary, buildDailyDigest } from '../agents/report.js';
 import { formatMoney } from '../util/money.js';
-import { baliParts, baliNowText } from '../util/dates.js';
+import { BALI_TZ, baliParts, baliNowText } from '../util/dates.js';
 import type { Receipt, WeddingNote } from '../types.js';
 
 const { Client, LocalAuth } = pkg;
@@ -399,10 +399,30 @@ async function isTargetGroup(msg: WAMessage): Promise<boolean> {
   return chat.name === config.whatsapp.groupName;
 }
 
+type MessageRoute = 'interactive' | 'silent-intake' | null;
+
+async function messageRoute(msg: WAMessage): Promise<MessageRoute> {
+  try {
+    if (await isTargetGroup(msg)) return 'interactive';
+  } catch (err) {
+    logger.warn({ err }, 'target-group check failed');
+  }
+  const silent = config.silentIntake;
+  if (silent.autoSave && silent.sourceGroupId && silent.auditGroupId && msg.from === silent.sourceGroupId) {
+    return 'silent-intake';
+  }
+  return null;
+}
+
 async function handleMessage(msg: WAMessage): Promise<void> {
   if (msg.fromMe) return;
-  if (!(await isTargetGroup(msg))) return;
+  const route = await messageRoute(msg);
+  if (!route) return;
   const sender = msg.author ?? msg.from;
+  if (route === 'silent-intake') {
+    await handleSilentIntake(msg, sender);
+    return;
+  }
 
   if (msg.hasMedia && (msg.type === 'image' || msg.type === 'document')) {
     await onImage(msg, sender);
@@ -612,6 +632,166 @@ async function onNote(msg: WAMessage, sender: string, text: string): Promise<voi
   const c = getCollecting(sender, msg);
   c.noteText = c.noteText ? `${c.noteText} ${text}` : text;
   schedule(sender);
+}
+
+/** Channel 2: read the real group silently, write complete expenses directly,
+ *  and report only to the audit/test group. */
+async function handleSilentIntake(msg: WAMessage, sender: string): Promise<void> {
+  if (msg.hasMedia && (msg.type === 'image' || msg.type === 'document')) {
+    await onSilentImage(msg, sender);
+    return;
+  }
+
+  const body = (msg.body ?? '').trim();
+  if (!body || body.startsWith('/')) return;
+  const word = body.toLowerCase().replace(/[^a-z]/g, '');
+  if (CONFIRM_WORDS.has(word) || CANCEL_WORDS.has(word)) return;
+
+  const isNote = config.triggerMode === 'keyword'
+    ? hasTrigger(body)
+    : looksLikeExpense(body) || hasTrigger(body);
+  if (!isNote) return;
+  await buildSilentFromCollection(msg, sender, stripKeyword(body), null);
+}
+
+async function onSilentImage(msg: WAMessage, sender: string): Promise<void> {
+  const caption = (msg.body ?? '').trim();
+  const img = await bufferMedia(msg);
+  if (!img && !caption) {
+    await notifySilentAudit(msg, 'Not saved - image could not be downloaded, and no caption was available.');
+    return;
+  }
+  if (!img && caption && !looksLikeExpense(caption)) {
+    await notifySilentAudit(msg, 'Not saved - image could not be downloaded, and the caption did not look like an expense.');
+    return;
+  }
+  await buildSilentFromCollection(msg, sender, stripKeyword(caption), img);
+}
+
+async function buildSilentFromCollection(
+  msg: WAMessage,
+  sender: string,
+  noteText: string,
+  img: BufferedImage | null,
+): Promise<void> {
+  const note = noteText.trim();
+  if (!note) {
+    await notifySilentAudit(msg, 'Not saved - add a caption/text note before silent auto-save.');
+    return;
+  }
+  if (isReimbursementText(note)) {
+    const drafts = img
+      ? await reimbursementDraftsFromImage(note, img)
+      : [await reimbursementDraftFromText(note)];
+    await saveSilentDrafts(msg, sender, drafts, [], null, img?.imagePath ?? null);
+    return;
+  }
+
+  const notes = note ? await parseEmployeeNotes(note) : [{ ...EMPTY_NOTE }];
+  let receipt: Receipt | null = null;
+  const extra: string[] = [];
+  if (img) {
+    receipt = await readReceipt(img);
+    if (!receipt) extra.push('Could not read the receipt image clearly.');
+  } else {
+    extra.push('No photo attached - recorded from the note only.');
+  }
+  const drafts = await buildDrafts(msg, notes, receipt, img?.imagePath ?? null, extra);
+  await saveSilentDrafts(msg, sender, drafts, notes, receipt, img?.imagePath ?? null);
+}
+
+async function reimbursementDraftsFromImage(noteText: string, img: BufferedImage): Promise<ExpenseDraft[]> {
+  const transfers = await extractReceipts(img.data, img.mimetype, 'reimbursement');
+  const typedName = noteText.replace(/.*\breimburse(ment|d)?\b/i, '').trim() || null;
+  const drafts = transfers.length
+    ? transfers.map((t) =>
+        buildReimbursementDraft(
+          transfers.length === 1 && typedName ? typedName : t.recipient,
+          t.total,
+          img.imagePath,
+          noteText,
+          t.date ?? null,
+        ),
+      )
+    : [buildReimbursementDraft(typedName, null, img.imagePath, noteText)];
+  if (!transfers.length) drafts[0].warnings.push('Could not read any transfer in the screenshot - please check.');
+  return drafts;
+}
+
+async function reimbursementDraftFromText(noteText: string): Promise<ExpenseDraft> {
+  const name = noteText.match(/\breimburse(?:ment|d)?\b\s*(?:to\s+)?([a-z][a-z'.-]*)/i)?.[1] ?? null;
+  const note = await parseEmployeeNote(noteText);
+  const draft = buildReimbursementDraft(name, note.amount, null, noteText, note.invoiceDate);
+  draft.warnings.push('No transfer screenshot attached - recorded from the note only.');
+  return draft;
+}
+
+async function saveSilentDrafts(
+  msg: WAMessage,
+  sender: string,
+  drafts: ExpenseDraft[],
+  notes: WeddingNote[],
+  receipt: Receipt | null,
+  imagePath: string | null,
+): Promise<void> {
+  const complete = drafts.filter((d) => missingRequired(d).length === 0);
+  const blocked = drafts
+    .map((d, i) => ({ i, draft: d, missing: missingRequired(d) }))
+    .filter((x) => x.missing.length);
+
+  let savedCount = 0;
+  let savedToNotion = 0;
+  if (complete.length) {
+    const pending: Pending = {
+      id: `${msg.id._serialized}:silent`,
+      sender,
+      drafts: complete,
+      notes,
+      receipt,
+      imagePath,
+      ts: Date.now(),
+      waMessageId: msg.id._serialized,
+      chatId: config.silentIntake.auditGroupId,
+    };
+    const result = await savePending(pending, sender);
+    savedCount = result.count;
+    savedToNotion = result.savedToNotion;
+  }
+
+  const lines: string[] = [];
+  if (savedCount) {
+    lines.push(savedToNotion > 0 ? `${messageTimeLabel(msg)} Saved to Notion.` : `${messageTimeLabel(msg)} Recorded. (Notion preview mode - not written yet.)`);
+  }
+  for (const b of blocked) {
+    const label = drafts.length > 1 ? ` ${b.i + 1}.` : '';
+    const what = b.draft.vendorDescription ?? 'expense';
+    lines.push(`${messageTimeLabel(msg)} Not saved${label} - ${what} needs ${b.missing.join(' / ')}.`);
+  }
+  if (!lines.length) lines.push(`${messageTimeLabel(msg)} Not saved - no expense draft was created.`);
+
+  await notifySilentAudit(msg, lines.join('\n'));
+  logger.info({ source: msg.from, audit: config.silentIntake.auditGroupId, savedCount, savedToNotion, blocked: blocked.length }, 'silent intake processed');
+}
+
+async function notifySilentAudit(msg: WAMessage, text: string): Promise<void> {
+  if (!config.silentIntake.auditGroupId) return;
+  // WhatsApp cannot quote a message from a different group, so keep the audit
+  // notice as plain text with the source message timestamp.
+  await sendToChat(config.silentIntake.auditGroupId, text, '[silent-intake preview]');
+}
+
+function messageTimeLabel(msg: WAMessage): string {
+  const ts = typeof msg.timestamp === 'number' ? msg.timestamp * 1000 : Date.now();
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: BALI_TZ,
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(ts));
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
+  return `${get('month')}/${get('day')} ${get('hour')}:${get('minute')}`;
 }
 
 /** Post/repost a pending's confirm summary, @-tagging the submitter so they get a
@@ -887,6 +1067,17 @@ async function finalize(
   imagePath: string | null,
   extraWarnings: string[],
 ): Promise<void> {
+  const drafts = await buildDrafts(msg, notes, receipt, imagePath, extraWarnings);
+  await showNewPending(msg, sender, drafts, notes, receipt, imagePath);
+}
+
+async function buildDrafts(
+  msg: WAMessage,
+  notes: WeddingNote[],
+  receipt: Receipt | null,
+  imagePath: string | null,
+  extraWarnings: string[],
+): Promise<ExpenseDraft[]> {
   // Whoever posts the bill is usually the handler — resolve to a known person
   // (via the learned staff map, growing as colleagues post).
   const senderName = await resolveSenderPerson(msg);
@@ -922,7 +1113,7 @@ async function finalize(
     }
     return d;
   });
-  await showNewPending(msg, sender, drafts, notes, receipt, imagePath);
+  return drafts;
 }
 
 /** Show a freshly-built submission as its OWN independent pending (one message →

@@ -27,6 +27,14 @@ export const config = {
     /** Optional Chrome/Chromium executable path (useful on Windows local runs). */
     executablePath: process.env.CHROME_EXECUTABLE_PATH ?? '',
   },
+  silentIntake: {
+    /** Main/real group to listen to silently. Empty = disabled. */
+    sourceGroupId: process.env.MAIN_SILENT_GROUP_ID ?? '',
+    /** Secondary/test/audit group where the bot posts save status. */
+    auditGroupId: process.env.AUDIT_GROUP_ID ?? '',
+    /** Must be true before messages from MAIN_SILENT_GROUP_ID are written directly. */
+    autoSave: bool(process.env.MAIN_SILENT_AUTOSAVE, false),
+  },
   notion: {
     apiKey: process.env.NOTION_API_KEY ?? '',
     /** The "EXPENSES" data source id to write rows into (2025-09-03 API). */

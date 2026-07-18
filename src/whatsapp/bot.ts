@@ -256,13 +256,14 @@ export function createBot() {
   });
   waClient = client;
 
-  let pairingAsked = false;
+  let lastPairingRequestAt = 0;
+  const pairingRefreshMs = Math.max(15_000, Number(process.env.PAIRING_CODE_REFRESH_MS ?? 20_000));
   client.on('qr', async (qr) => {
     // Preferred when re-linking remotely: an 8-char code typed on the phone
     // ("Link with phone number instead") — no QR scanning needed.
     const pairingCodeFile = path.join(config.paths.dataDir, 'last-pairing-code.txt');
-    if (config.whatsapp.pairNumber && !pairingAsked) {
-      pairingAsked = true;
+    if (config.whatsapp.pairNumber && Date.now() - lastPairingRequestAt >= pairingRefreshMs) {
+      lastPairingRequestAt = Date.now();
       try {
         fs.rmSync(pairingCodeFile, { force: true });
         const code = await client.requestPairingCode(config.whatsapp.pairNumber);

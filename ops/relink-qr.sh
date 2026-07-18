@@ -53,6 +53,9 @@ cat >"${WEB_DIR}/index.html" <<'HTML'
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="cache-control" content="no-store, no-cache, must-revalidate">
+  <meta http-equiv="pragma" content="no-cache">
+  <meta http-equiv="expires" content="0">
   <title>DADA Bot WhatsApp Link</title>
   <style>
     body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: system-ui, sans-serif; background: #f5f5f5; color: #111; }
@@ -61,6 +64,7 @@ cat >"${WEB_DIR}/index.html" <<'HTML'
     .code { margin: 18px auto 0; max-width: 560px; background: white; padding: 16px; box-shadow: 0 1px 10px #0002; }
     .label { margin: 0 0 8px; color: #555; font-size: 14px; }
     #pairing { margin: 0; font-size: clamp(32px, 9vw, 54px); font-weight: 800; letter-spacing: .08em; }
+    #updated { margin-top: 8px; color: #777; font-size: 13px; }
     p { margin: 12px 0 0; color: #555; }
   </style>
 </head>
@@ -70,8 +74,9 @@ cat >"${WEB_DIR}/index.html" <<'HTML'
     <div class="code">
       <p class="label">Pairing code (if available)</p>
       <pre id="pairing">loading...</pre>
+      <div id="updated">checking...</div>
     </div>
-    <p>Refreshes every 5 seconds. Use either the pairing code or scan the QR.</p>
+    <p>Refreshes every second. Use the newest pairing code or scan the QR.</p>
   </main>
   <script>
     async function refresh() {
@@ -80,12 +85,14 @@ cat >"${WEB_DIR}/index.html" <<'HTML'
         const res = await fetch('pairing-code.txt?t=' + Date.now(), { cache: 'no-store' });
         const text = (await res.text()).trim();
         document.getElementById('pairing').textContent = text || 'No code';
+        document.getElementById('updated').textContent = 'Checked ' + new Date().toLocaleTimeString();
       } catch {
         document.getElementById('pairing').textContent = 'No code';
+        document.getElementById('updated').textContent = 'Check failed ' + new Date().toLocaleTimeString();
       }
     }
     refresh();
-    setInterval(refresh, 5000);
+    setInterval(refresh, 1000);
   </script>
 </body>
 </html>
@@ -94,14 +101,16 @@ HTML
 (
   while true; do
     if [[ -s "${QR_TXT}" ]]; then
-      qrencode -s 10 -m 2 -r "${QR_TXT}" -o "${WEB_DIR}/wa.png" 2>/dev/null || true
+      qrencode -s 10 -m 2 -r "${QR_TXT}" -o "${WEB_DIR}/wa.png.tmp" 2>/dev/null && mv "${WEB_DIR}/wa.png.tmp" "${WEB_DIR}/wa.png" || true
     fi
     if [[ -s "${PAIRING_TXT}" ]]; then
-      cp "${PAIRING_TXT}" "${WEB_DIR}/pairing-code.txt"
+      tr -d '\r' <"${PAIRING_TXT}" >"${WEB_DIR}/pairing-code.txt.tmp"
+      mv "${WEB_DIR}/pairing-code.txt.tmp" "${WEB_DIR}/pairing-code.txt"
     else
-      printf 'No pairing code right now\n' >"${WEB_DIR}/pairing-code.txt"
+      printf 'No pairing code right now\n' >"${WEB_DIR}/pairing-code.txt.tmp"
+      mv "${WEB_DIR}/pairing-code.txt.tmp" "${WEB_DIR}/pairing-code.txt"
     fi
-    sleep 2
+    sleep 1
   done
 ) &
 QR_LOOP_PID="$!"

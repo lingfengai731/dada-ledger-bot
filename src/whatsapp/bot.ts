@@ -262,13 +262,16 @@ export function createBot() {
     // Preferred when re-linking remotely: an 8-char code typed on the phone
     // ("Link with phone number instead") — no QR scanning needed.
     const pairingCodeFile = path.join(config.paths.dataDir, 'last-pairing-code.txt');
+    const pairingStatusFile = path.join(config.paths.dataDir, 'last-pairing-status.txt');
     if (config.whatsapp.pairNumber && Date.now() - lastPairingRequestAt >= pairingRefreshMs) {
       lastPairingRequestAt = Date.now();
       try {
         fs.rmSync(pairingCodeFile, { force: true });
+        fs.writeFileSync(pairingStatusFile, `Requesting pairing code at ${new Date().toISOString()}\n`);
         const code = await client.requestPairingCode(config.whatsapp.pairNumber);
         const pretty = code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
         fs.writeFileSync(pairingCodeFile, `${pretty}\n`);
+        fs.writeFileSync(pairingStatusFile, `Pairing code refreshed at ${new Date().toISOString()}\n`);
         logger.info(
           `\n\n🔗 LINK WITH PHONE NUMBER — on the bot phone:\n` +
             `   WhatsApp → Linked devices → Link a device → "Link with phone number instead"\n` +
@@ -276,6 +279,8 @@ export function createBot() {
         );
       } catch (err) {
         fs.rmSync(pairingCodeFile, { force: true });
+        const message = err instanceof Error ? err.message : String(err);
+        fs.writeFileSync(pairingStatusFile, `Pairing code request failed at ${new Date().toISOString()}: ${message}\n`);
         logger.error({ err }, 'pairing-code request failed — fall back to the QR below');
       }
     }

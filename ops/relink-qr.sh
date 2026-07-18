@@ -16,6 +16,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 QR_TXT="${ROOT_DIR}/data/last-qr.txt"
 PAIRING_TXT="${ROOT_DIR}/data/last-pairing-code.txt"
+PAIRING_STATUS_TXT="${ROOT_DIR}/data/last-pairing-status.txt"
 WEB_DIR="${TMPDIR:-/tmp}/dada-wa-qr"
 PORT="${PORT:-8080}"
 PUBLIC_HOST="${PUBLIC_HOST:-}"
@@ -64,6 +65,7 @@ cat >"${WEB_DIR}/index.html" <<'HTML'
     .code { margin: 18px auto 0; max-width: 560px; background: white; padding: 16px; box-shadow: 0 1px 10px #0002; }
     .label { margin: 0 0 8px; color: #555; font-size: 14px; }
     #pairing { margin: 0; font-size: clamp(32px, 9vw, 54px); font-weight: 800; letter-spacing: .08em; }
+    #status { margin-top: 8px; color: #666; font-size: 13px; overflow-wrap: anywhere; }
     #updated { margin-top: 8px; color: #777; font-size: 13px; }
     p { margin: 12px 0 0; color: #555; }
   </style>
@@ -74,6 +76,7 @@ cat >"${WEB_DIR}/index.html" <<'HTML'
     <div class="code">
       <p class="label">Pairing code (if available)</p>
       <pre id="pairing">loading...</pre>
+      <div id="status">status loading...</div>
       <div id="updated">checking...</div>
     </div>
     <p>Refreshes every second. Use the newest pairing code or scan the QR.</p>
@@ -85,9 +88,13 @@ cat >"${WEB_DIR}/index.html" <<'HTML'
         const res = await fetch('pairing-code.txt?t=' + Date.now(), { cache: 'no-store' });
         const text = (await res.text()).trim();
         document.getElementById('pairing').textContent = text || 'No code';
+        const statusRes = await fetch('pairing-status.txt?t=' + Date.now(), { cache: 'no-store' });
+        const statusText = (await statusRes.text()).trim();
+        document.getElementById('status').textContent = statusText || 'No status yet';
         document.getElementById('updated').textContent = 'Checked ' + new Date().toLocaleTimeString();
       } catch {
         document.getElementById('pairing').textContent = 'No code';
+        document.getElementById('status').textContent = 'Status unavailable';
         document.getElementById('updated').textContent = 'Check failed ' + new Date().toLocaleTimeString();
       }
     }
@@ -109,6 +116,13 @@ HTML
     else
       printf 'No pairing code right now\n' >"${WEB_DIR}/pairing-code.txt.tmp"
       mv "${WEB_DIR}/pairing-code.txt.tmp" "${WEB_DIR}/pairing-code.txt"
+    fi
+    if [[ -s "${PAIRING_STATUS_TXT}" ]]; then
+      tr -d '\r' <"${PAIRING_STATUS_TXT}" >"${WEB_DIR}/pairing-status.txt.tmp"
+      mv "${WEB_DIR}/pairing-status.txt.tmp" "${WEB_DIR}/pairing-status.txt"
+    else
+      printf 'No pairing-code request status yet\n' >"${WEB_DIR}/pairing-status.txt.tmp"
+      mv "${WEB_DIR}/pairing-status.txt.tmp" "${WEB_DIR}/pairing-status.txt"
     fi
     sleep 1
   done

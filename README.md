@@ -318,7 +318,7 @@ ls -l data/last-qr.txt                   # 有内容即可(pm2 logs 看一眼也
    http://207.148.68.180:8080/
    ```
 
-   页面会同时显示**清晰二维码**和**Pairing code(如果 WhatsApp 成功发出)**。页面每秒刷新一次并显示 checked 时间;优先试配对码:机器人手机 WhatsApp → 已链接的设备 → 链接设备 → `Link with phone number instead` → 输入页面上的最新 8 位码;没有配对码或失败时就直接扫二维码。
+   页面会同时显示**清晰二维码**、**Pairing code(如果 WhatsApp 成功发出)** 和 bot 端 pairing-code 请求状态。页面每秒刷新一次并显示 checked 时间;优先试配对码:机器人手机 WhatsApp → 已链接的设备 → 链接设备 → `Link with phone number instead` → 输入页面上的最新 8 位码;没有配对码或失败时就直接扫二维码。
 
 5. 看到 `WhatsApp client ready ✅` 即成功,清理:
 
@@ -327,6 +327,7 @@ ls -l data/last-qr.txt                   # 有内容即可(pm2 logs 看一眼也
 ```
 
 > ⚠️ 二维码/配对码可能很快过期;网页会每秒拉取最新文件。如果页面 checked 时间不动,强制刷新浏览器或重新跑 `./ops/relink-qr.sh`。
+> 终端里的 `GET /pairing-code.txt ... 200` 只是浏览器在取文件,不代表 WhatsApp 成功发出了配对码。真正状态看网页的 status 行,或在 VPS 跑 `cat data/last-pairing-status.txt`。
 > `./ops/relink-qr.sh` 必须一直开着才有网页;`pm2 logs` 只是"看日志",关掉它不影响机器人后台运行——只有 `pm2 stop/restart/delete` 才动机器人。
 > 打不开网页(转圈/超时):多半是 8080 被防火墙挡了,回去做"一次性准备"里的放行;也可临时换端口:`PORT=8081 ./ops/relink-qr.sh`。
 

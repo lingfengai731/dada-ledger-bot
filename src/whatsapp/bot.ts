@@ -120,6 +120,17 @@ function pendingsForChat(chatId: string): Pending[] {
   return [...pendingDrafts.values()].filter((p) => p.chatId === chatId).sort((a, b) => a.ts - b.ts);
 }
 
+function matchesPendingMessage(p: Pending, messageId: string): boolean {
+  return p.summaryMsgId === messageId || p.nudgeMsgId === messageId || p.waMessageId === messageId;
+}
+
+function clearPendingSet(pendings: Pending[]): number {
+  const unique = new Map<string, Pending>();
+  for (const p of pendings) unique.set(p.id, p);
+  for (const p of unique.values()) clearPending(p);
+  return unique.size;
+}
+
 /** The sender's most-recently-shown pending (the default target for a correction). */
 function currentPending(sender: string): Pending | null {
   const all = pendingsForSender(sender);
@@ -138,6 +149,8 @@ function restorePending(): void {
       // columns are authoritative, so "ok"/corrections still find them.
       p.id = row.id;
       p.sender = row.sender;
+      p.chatId = row.chat_id;
+      p.waMessageId = row.wa_message_id ?? p.waMessageId;
       pendingDrafts.set(row.id, p);
       n++;
     } catch {
@@ -480,9 +493,7 @@ async function handleMessage(msg: WAMessage): Promise<void> {
   const wantsAll = word === 'okall' || word === 'allok' || word === 'cancelall' || word === 'allcancel';
   const chatPendings = pendingsForChat(msg.from);
   const quotedId = quoted?.id?._serialized ?? null;
-  const chatTargeted = quotedId
-    ? chatPendings.find((p) => p.summaryMsgId === quotedId || p.nudgeMsgId === quotedId || p.waMessageId === quotedId) ?? null
-    : null;
+  const chatTargets = quotedId ? chatPendings.filter((p) => matchesPendingMessage(p, quotedId)) : [];
   if (word === 'cancelall' || word === 'allcancel') {
     const cancelled = clearPendingsForChat(msg.from);
     await reply(
@@ -493,8 +504,12 @@ async function handleMessage(msg: WAMessage): Promise<void> {
     );
     return;
   }
-  if (chatTargeted && /\bcancel\b/i.test(body)) {
-    clearPending(chatTargeted);
+  if (chatTargets.length && /\bcancel\b/i.test(body)) {
+    const cancelled = clearPendingSet(chatTargets);
+    if (cancelled > 1) {
+      await reply(msg, `Cancelled ${cancelled} pending expenses covered by that reminder.`);
+      return;
+    }
     await reply(msg, '🗑️ Cancelled — nothing was saved.');
     return;
   }
@@ -502,9 +517,7 @@ async function handleMessage(msg: WAMessage): Promise<void> {
   const pendings = pendingsForSender(sender);
   if (pendings.length) {
     // Quoting one of my confirm messages targets THAT pending; otherwise the latest.
-    const targeted = quotedId
-      ? pendings.find((p) => p.summaryMsgId === quotedId || p.nudgeMsgId === quotedId || p.waMessageId === quotedId) ?? null
-      : null;
+    const targeted = quotedId ? pendings.find((p) => matchesPendingMessage(p, quotedId)) ?? null : null;
     const target = targeted ?? pendings[pendings.length - 1];
 
     // Boss's rule: a plain "ok" confirms ONLY the most recent submission (or the
@@ -1309,6 +1322,7 @@ async function savePending(pending: Pending, sender: string): Promise<{ savedToN
  */
 async function sweepPending(): Promise<void> {
   const now = Date.now();
+  const nudgeGroups = new Map<string, { sender: string; chatId: string; pendings: Pending[] }>();
   for (const row of store.pendingOlderThan(now - NUDGE_MS)) {
     if (!pendingDrafts.has(row.id)) continue;
     let pending: Pending;
@@ -1320,6 +1334,8 @@ async function sweepPending(): Promise<void> {
     }
     pending.id = row.id;          // columns are authoritative (older payloads lack these)
     pending.sender = row.sender;
+    pending.chatId = row.chat_id;
+    pending.waMessageId = row.wa_message_id ?? pending.waMessageId;
     const age = now - row.updated_at;
 
     // ── 8h: auto-save complete drafts; nudge blocked ones once. ──
@@ -1355,9 +1371,23 @@ async function sweepPending(): Promise<void> {
     // ── 30 min: @-nudge the staff who posted it, once. ──
     if (!pending.nudged30) {
       if (!pendingDrafts.has(row.id)) continue;
-      await sendNudge(row.sender, row.chat_id, pending);
+      const key = `${row.chat_id}\0${row.sender}`;
+      const group = nudgeGroups.get(key) ?? { sender: row.sender, chatId: row.chat_id, pendings: [] };
+      group.pendings.push(pending);
+      nudgeGroups.set(key, group);
+    }
+  }
+
+  for (const group of nudgeGroups.values()) {
+    const active = group.pendings.filter((p) => pendingDrafts.has(p.id));
+    if (!active.length) continue;
+    const nudgeMsgId = await sendNudge(group.sender, group.chatId, active);
+    for (const pending of active) {
+      if (!pendingDrafts.has(pending.id)) continue;
       pending.nudged30 = true;
-      store.updatePendingPayload(row.id, JSON.stringify(pending));
+      if (nudgeMsgId) pending.nudgeMsgId = nudgeMsgId;
+      pendingDrafts.set(pending.id, pending);
+      store.updatePendingPayload(pending.id, JSON.stringify(pending));
     }
   }
 }
@@ -1398,25 +1428,31 @@ async function sendToChat(chatId: string, text: string, previewLabel: string, op
 }
 
 /** Remind the staff member who posted an unconfirmed expense, @-mentioning them. */
-async function sendNudge(sender: string, chatId: string, pending: Pending): Promise<void> {
+async function sendNudge(sender: string, chatId: string, pending: Pending[] | Pending): Promise<string | null> {
   const number = sender.split('@')[0];
-  const n = pending.drafts.length;
-  const total = pending.drafts.reduce((s, d) => s + (d.cost ?? d.reimbursed ?? 0), 0);
+  const list = Array.isArray(pending) ? pending : [pending];
+  const drafts = list.flatMap((p) => p.drafts);
+  const n = drafts.length;
+  const total = drafts.reduce((s, d) => s + (d.cost ?? d.reimbursed ?? 0), 0);
   // Name the whole outstanding set, not just the first item (the old nudge only
   // mentioned drafts[0], so a batch looked like a single expense).
   const what = n > 1
     ? `your *${n} expenses* (total ${formatMoney(total)} ${config.currency})`
-    : `*${pending.drafts[0]?.vendorDescription ?? 'this expense'}*`;
-  const missing = [...new Set(pending.drafts.flatMap((d) => missingRequired(d)))];
+    : `*${drafts[0]?.vendorDescription ?? 'this expense'}*`;
+  const missing = [...new Set(drafts.flatMap((d) => missingRequired(d)))];
+  const confirmHint = n > 1 ? 'Reply *ok all* to save all, or send a correction.' : 'Reply *ok* to save, or send a correction.';
+  const missingHint = n > 1 ? 'Reply with it, then *ok all*.' : 'Reply with it, then *ok*.';
   const text = missing.length
-    ? `⏰ @${number} I still need the *${missing.join('* & *')}* for ${what} before I can save. Reply with it, then *ok*.`
-    : `⏰ @${number} please confirm ${what} — reply *ok* to save all, or send a correction.`;
+    ? `⏰ @${number} I still need the *${missing.join('* & *')}* for ${what} before I can save. ${missingHint}`
+    : `⏰ @${number} please confirm ${what} — ${confirmHint}`;
   // Quote the original confirm message so staff can tap to jump back to it.
   const opts: { mentions: string[]; quotedMessageId?: string } = { mentions: [sender] };
-  const quote = pending.summaryMsgId ?? pending.waMessageId;
+  const newest = [...list].sort((a, b) => b.ts - a.ts)[0];
+  const quote = newest?.summaryMsgId ?? newest?.waMessageId;
   if (quote) opts.quotedMessageId = quote;
   const sent = await sendToChat(chatId, text, '[nudge preview]', opts);
-  if (sent) pending.nudgeMsgId = sent.id._serialized;
+  if (sent) for (const p of list) p.nudgeMsgId = sent.id._serialized;
+  return sent?.id._serialized ?? null;
 }
 
 function renderSummary(drafts: ExpenseDraft[]): string {

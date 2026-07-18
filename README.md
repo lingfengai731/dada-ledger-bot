@@ -43,14 +43,14 @@
 - **每一笔单独确认**:每条提交各自回一条确认,用固定 **6 字段格式**(Vendor/description、Cost、Invoice date、Wedding date、PIC、Handler)。**不同提交永不合并**,也不会把别人或你上一条的支出粘在一起。
 - **一次性连发很多笔**(一条消息多行 / 几秒内连发)才会汇总成**一条带编号的列表**(`1. … 2. …`);老板早上发的 15 笔就是这种。
 - **群里不显示 TOTAL**:合计只出现在**每晚私发老板的明细总结**里,群内确认从不算总额。
-- **回复**(老板定版):`ok` = 只确认**最近一笔**;**引用**某条确认消息再回 `ok` = 只确认那一条;`ok all` / `all ok` = 确认你名下全部。`cancel` 同理;引用原 invoice、机器人确认摘要、或 30 分钟提醒再回 `cancel` 都只删那一笔;`cancel all` 会从数据库清掉**当前群全部**待确认缓存。
+- **回复**(老板定版):`ok` = 只确认**最近一笔**;**引用**某条确认消息再回 `ok` = 只确认那一条;`ok all` / `all ok` = 确认你名下全部。`cancel` 同理;引用原 invoice、机器人确认摘要、或 30 分钟提醒再回 `cancel` 会删除被引用消息覆盖的待确认项;`cancel all` 会从数据库清掉**当前群全部**待确认缓存。
 - **Saved 回执带引用**:`✅ Saved to Notion.` 会优先**引用机器人确认摘要**(那条 `Please confirm this ... expense`),明确存的是哪笔;如果 WhatsApp Web 找不到确认摘要,再退回引用原始提交,最后才引用这次 `ok`(`ok all` 时每笔各回一条)。
 - **改某一笔**:对编号列表回 `1. 130000`(改金额)、`3. christi`(设 PIC);只发 `christi` 会给**所有缺 PIC 的行**补上。
 - **多人并发不互串**:按各自 WhatsApp id 分别记账;一个人也能同时有多条待确认,各自提醒、各自保存,互不覆盖。
 
 **两条并行支线:**
 - **报销**:Ling 发「转账截图 + `Reimbursement <名字>`」→ 视觉读出每笔转账(一图可多笔)→ 写入 `REIMBURSED` 列(不写 COST、不要婚期/PIC)。见 `buildReimbursementDraft`。
-- **未确认兜底**:草稿超过 **30 分钟**没回 `ok` → @发件人提醒(每条单独提醒,说明"你的 N 笔");超过 **8 小时** → 信息齐全的自动写入(`sweepPending`)。
+- **未确认兜底**:草稿超过 **30 分钟**没回 `ok` → 按当前群+发件人聚合成**一条** @提醒(多笔时提示 `ok all`);超过 **8 小时** → 信息齐全的自动写入(`sweepPending`)。
 
 群内命令:`/ask <问题>`、`/total`、`/summary [month]`、`/owed [名字]`、`/iam <名字>`(告诉机器人你是谁,提高 handler 判断)、`/pushsummary [today|month]`、`/undo`(撤销自己上一笔,并归档对应 Notion 行)、`/help`。
 
@@ -112,7 +112,7 @@ cancel / cancel all — discard instead
 - 婚礼单**务必**写 `wed` + `pic`;名字:`Ling / Jay / Christi / Putri`(**Jay = Jessica**)。发票日读不到照片时,开头手写的日期兜底。
 - 照片**带 caption 一条发**最方便;分两条发(照片 + 文字)也能拼上。
 - **报销(Ling 打款给员工;只有 Ling 用)**:`reimbursement <员工名>` + 转账截图(一张截图含多笔也行;纯文字也能记,如 `14/6 reimbursement to putri 50000`)。金额/日期从截图读,截图没日期就用**发进群当天**;**PIC 恒为 LING、HANDLER=被报销的员工**,金额进 `REIMBURSED`,标题 `REIMBURSEMENT <名字>`,`EXPENSE TYPE=Reimbursement`。
-- **发错了怎么删**:引用发错的原消息、机器人的确认摘要、或 30 分钟 `⏰ please confirm` 提醒,回一句含 `cancel` 的话(如 `cancel unsaved expenses`)即可只删那一笔;单发 `cancel` 删最近一笔;`cancel all` 清掉当前群全部待确认。
+- **发错了怎么删**:引用发错的原消息、机器人的确认摘要、或 30 分钟 `⏰ please confirm` 提醒,回一句含 `cancel` 的话(如 `cancel unsaved expenses`)即可删除被引用消息覆盖的待确认项;单发 `cancel` 删最近一笔;`cancel all` 清掉当前群全部待确认。
 - **改金额**:直接回一个**纯数字**(如 `1.132.500`)= 修正当前显示那笔的金额,不会被当成新账。
 
 ## 三、★ 智能补全(2026-06 升级)
@@ -617,11 +617,11 @@ pm2 restart dada-bot
 | 15 | 报销(截图) | 转账截图 + `reimbursement putri` | 💸 报销确认;金额/日期从截图读;Notion:标题 `REIMBURSEMENT PUTRI`、**PIC=LING、HANDLER=PUTRI**、`EXPENSE TYPE=Reimbursement` |
 | 15b | 报销(纯文字) | `14/6 reimbursement to putri 50000` | 同上,金额/日期取自文字(没日期用当天) |
 | 15c | 纯数字改金额 | 对着确认回 `1.132.500` | 修正那笔的金额(不是新账) |
-| 15d | 引用删单 | 引用发错的原消息、确认摘要、或 30 分钟提醒回 `cancel unsaved expenses` | 只删那一笔待确认 |
+| 15d | 引用删单 | 引用发错的原消息、确认摘要、或 30 分钟提醒回 `cancel unsaved expenses` | 删除被引用消息覆盖的待确认项;聚合提醒可能覆盖多笔 |
 | 16 | 重复防呆 | 同一笔发两遍 | 第二遍 ⚠️ 疑似重复 |
 | 17 | 忽略闲聊 | 有待确认时发闲聊 | 不回应、不刷屏 |
 | 18 | 命令 | `/help` `/total` `/ask 这个月花了多少` `/iam putu` | 各自正确回复 |
-| 19 | 30 分钟提醒 | 不回 `ok` 等 30-45 分钟 | @发件人,引用原摘要,一次 |
+| 19 | 30 分钟提醒 | 不回 `ok` 等 30-45 分钟 | 按当前群+发件人聚合为一条 @提醒,引用最新摘要,一次 |
 | 20 | 8 小时自动存 | 信息齐全不回 `ok` 放 8 小时 | 自动写入并在群里通告(信息不全则提醒) |
 | 21 | 每晚老板总结 | `/pushsummary today` 模拟 | 私发 Ling 当日明细 + TOTAL |
 | 22 | 日程表纠错 | 婚期写错但场地在日程表上 | ℹ️ `Wedding date adjusted to <日期> at <场地>. Correct me if wrong.` |
